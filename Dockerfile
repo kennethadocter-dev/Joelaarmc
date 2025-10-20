@@ -8,7 +8,10 @@ WORKDIR /var/www/html
 COPY . .
 
 # Install dependencies
-RUN composer install --no-dev --optimize-autoloader
+# Prepare Laravel directories and permissions
+RUN mkdir -p /var/www/html/storage /var/www/html/bootstrap/cache \
+    && chmod -R 777 /var/www/html/storage /var/www/html/bootstrap/cache \
+    && composer install --no-dev --optimize-autoloader
 RUN php artisan key:generate
 RUN php artisan config:cache
 RUN php artisan route:cache
