@@ -16,4 +16,3 @@ RUN mkdir -p /var/www/html/storage /var/www/html/bootstrap/cache \
 USER www-data
 
 EXPOSE 80
-CMD ["supervisord"]
