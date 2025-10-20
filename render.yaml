@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: joelaar-micro-credit
+    env: php
+    plan: free
+    buildCommand: |
+      composer install
+      php artisan key:generate
+      php artisan migrate --force
+      php artisan optimize
+    startCommand: php artisan serve --host 0.0.0.0 --port 10000
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_KEY
+        generateValue: true
+      - key: APP_DEBUG
+        value: false
+      - key: APP_URL
+        value: https://joelaar-loan-app.onrender.com
+      - key: DB_CONNECTION
+        value: sqlite
