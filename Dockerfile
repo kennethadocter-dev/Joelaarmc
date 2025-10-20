@@ -15,8 +15,5 @@ RUN mkdir -p /var/www/html/storage /var/www/html/bootstrap/cache \
 # Switch back to non-root user for security
 USER www-data
 
-RUN php artisan key:generate
-RUN php artisan config:cache
-
 EXPOSE 80
 CMD ["start-container"]
