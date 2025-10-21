@@ -35,8 +35,8 @@ RUN php artisan key:generate --force || true \
 # Switch back to web user
 USER www-data
 
-# Expose default port
-EXPOSE 80
+# ✅ Expose Laravel HTTP port for Render
+EXPOSE 10000
 
-# Start PHP-FPM (Nginx handled by base image)
-CMD ["php-fpm"]
+# ✅ Start Laravel HTTP server
+CMD php artisan serve --host=0.0.0.0 --port=10000
