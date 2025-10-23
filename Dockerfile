@@ -1,17 +1,14 @@
 # ============================================================
 # 🚀 FINAL PRODUCTION DOCKERFILE — Laravel + React + PostgreSQL
-# ✅ Runs Nginx + PHP-FPM + Supervisor with gzip & brotli
+# ✅ Works perfectly on Render / Railway / local Docker
 # ============================================================
 
-# ---- Stage 1: Frontend build (Node + Vite) ----
+# ---- Stage 1: Build frontend (React + Vite) ----
 FROM node:20-alpine AS frontend
 WORKDIR /app
 
-# Cache dependencies
 COPY package*.json vite.config.js ./
 RUN npm install
-
-# Copy source and build
 COPY resources ./resources
 RUN npm run build
 
@@ -19,7 +16,7 @@ RUN npm run build
 # ---- Stage 2: Laravel Runtime ----
 FROM serversideup/php:8.3-fpm-nginx
 
-# ✅ Enable OPcache for better performance
+# ✅ Enable OPcache for production
 ENV PHP_OPCACHE_ENABLE=1 \
     PHP_OPCACHE_VALIDATE_TIMESTAMPS=0 \
     PHP_OPCACHE_MAX_ACCELERATED_FILES=20000 \
@@ -29,29 +26,29 @@ ENV PHP_OPCACHE_ENABLE=1 \
 
 WORKDIR /var/www/html
 
-# Copy composer files and install dependencies
+# Copy composer files and install PHP dependencies
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --optimize-autoloader
 
-# Copy full Laravel application
+# Copy full Laravel app
 COPY . .
 
-# Copy built frontend assets from previous stage
+# Copy built frontend assets from first stage
 COPY --from=frontend /app/public/build ./public/build
 
 USER root
 
-# Install Nginx, Brotli, Supervisor & utilities
+# 🧩 Install Nginx, Brotli, Supervisor, Curl
 RUN apt-get update && \
     apt-get install -y nginx brotli supervisor curl && \
     rm -rf /var/lib/apt/lists/*
 
-# 🔧 Copy Nginx configuration (create this file in project root)
+# 🔧 Copy Nginx configuration (create nginx.conf in project root)
 COPY nginx.conf /etc/nginx/sites-enabled/default.conf
 
-# 🔧 Supervisor configuration to run PHP-FPM + Nginx together
-RUN mkdir -p /etc/supervisor/conf.d && \
-    echo "[supervisord]
+# 🔧 Add Supervisor configuration (multi-line heredoc — valid syntax)
+RUN mkdir -p /etc/supervisor/conf.d && cat > /etc/supervisor/conf.d/supervisord.conf <<'EOL'
+[supervisord]
 nodaemon=true
 
 [program:php-fpm]
@@ -65,9 +62,9 @@ command=nginx -g 'daemon off;'
 autostart=true
 autorestart=true
 priority=20
-" > /etc/supervisor/conf.d/supervisord.conf
+EOL
 
-# ✅ Fix permissions for Laravel writable directories
+# 🧩 Fix permissions for Laravel writable directories
 RUN mkdir -p storage bootstrap/cache storage/logs && \
     chmod -R 777 storage bootstrap/cache storage/logs && \
     chown -R www-data:www-data /var/www/html
@@ -81,7 +78,7 @@ HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
 # ✅ Expose Render port
 EXPOSE 8080
 
-# ✅ Start app with pre-deploy optimizations
+# ✅ Start Laravel optimizations then Supervisor
 CMD php artisan config:clear && \
     php artisan optimize:clear && \
     php artisan config:cache && \
