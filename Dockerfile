@@ -35,10 +35,10 @@ EXPOSE 10000
 
 # ✅ Start Laravel's built-in HTTP server
 # Render will automatically inject env vars before this runs
-CMD php artisan key:generate --force || true && \
-    php artisan migrate --force || true && \
+CMD php artisan config:clear && \
     php artisan optimize:clear && \
     php artisan config:cache && \
     php artisan route:cache && \
     php artisan view:cache && \
+    php artisan migrate --force || true && \
     php artisan serve --host=0.0.0.0 --port=10000
