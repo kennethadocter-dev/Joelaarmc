@@ -1,54 +1,43 @@
 # ============================================================
-# 🚀 FINAL DOCKERFILE — Laravel + React + PostgreSQL (Render)
+# ✅ PRODUCTION DOCKERFILE — Render (Laravel + React + PostgreSQL)
 # ============================================================
 
-# ---- Stage 1: Frontend Build (React + Vite) ----
-FROM node:20-alpine AS frontend
-WORKDIR /app
-COPY package*.json vite.config.js ./
-RUN npm install
-COPY resources ./resources
-RUN npm run build
-
-
-# ---- Stage 2: Laravel Runtime ----
 FROM serversideup/php:8.3-fpm-nginx
 
-# Enable OPcache
-ENV PHP_OPCACHE_ENABLE=1 \
-    PHP_OPCACHE_VALIDATE_TIMESTAMPS=0 \
-    PHP_OPCACHE_MAX_ACCELERATED_FILES=20000 \
-    PHP_OPCACHE_MEMORY_CONSUMPTION=192 \
-    PHP_OPCACHE_INTERNED_STRINGS_BUFFER=16 \
-    PHP_OPCACHE_REVALIDATE_FREQ=0
-
+# Set working directory
 WORKDIR /var/www/html
 
-# Copy and install PHP deps
-COPY composer.json composer.lock ./
-RUN composer install --no-dev --optimize-autoloader
-
-# Copy Laravel app & built assets
+# Copy everything
 COPY . .
-COPY --from=frontend /app/public/build ./public/build
 
+# Switch to root for setup
 USER root
 
-# Fix permissions
+# 🧩 Install Node.js & npm
+RUN apt-get update && apt-get install -y curl gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && npm install -g npm@latest
+
+# 🧩 Install PHP dependencies & build frontend
+RUN composer install --no-dev --optimize-autoloader
+RUN npm install && npm run build
+
+# 🧩 Fix permissions
 RUN mkdir -p storage bootstrap/cache storage/logs && \
     chmod -R 777 storage bootstrap/cache storage/logs && \
     chown -R www-data:www-data /var/www/html
 
+# Switch back to web user
 USER www-data
 
-# ✅ The serversideup image already runs PHP-FPM + Nginx on port 8080
+# ✅ Expose port 8080 for Render
 EXPOSE 8080
 
-# ✅ Run Laravel optimizations & migrations, then start the supervisor
+# ✅ Let the image’s built-in supervisor handle Nginx/PHP-FPM
 CMD php artisan config:clear && \
     php artisan optimize:clear && \
     php artisan config:cache && \
     php artisan route:cache && \
     php artisan view:cache && \
     php artisan migrate --force || true && \
-    /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
+    php artisan serve --host=0.0.0.0 --port=8080
