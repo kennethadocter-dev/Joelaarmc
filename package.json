@@ -4,7 +4,7 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "vite build",
+        "build": "vite build && node move-manifest.js",
         "preview": "vite preview",
         "serve": "php artisan serve",
         "dev:all": "concurrently \"npm run serve\" \"npm run dev\"",

@@ -1,1 +1,0 @@
-import{j as t,H as e}from"./app-Cv3QELsD.js";import{A as s}from"./AuthenticatedLayout-B0rF1LC0.js";/* empty css            */import"./transition-2rVswJNR.js";function u(){return t.jsxs(s,{header:"Customers",children:[t.jsx(e,{title:"Customers"}),t.jsx("h1",{className:"text-2xl font-bold",children:"Customers Management"})]})}export{u as default};

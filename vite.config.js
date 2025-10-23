@@ -1,13 +1,12 @@
 import { defineConfig } from "vite";
 import laravel from "laravel-vite-plugin";
 import react from "@vitejs/plugin-react";
-import { resolve } from "path";
 
 // ============================================================
-// ✅ FINAL VITE CONFIG — Laravel + React (Render / Production)
+// ✅ FIXED VITE CONFIG — Laravel + React (no more .vite folder)
 // ============================================================
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
     plugins: [
         laravel({
             input: ["resources/css/app.css", "resources/js/app.jsx"],
@@ -16,39 +15,29 @@ export default defineConfig(({ command }) => ({
         react(),
     ],
 
-    // ✅ Ensure correct base path for assets in production
-    base: command === "build" ? "/build/" : "/",
-
-    // ✅ Development server (only runs locally, ignored on Render)
-    server: {
-        host: "0.0.0.0",
-        port: 5173,
-        strictPort: true,
-        https: false, // Render handles HTTPS automatically
-        watch: {
-            usePolling: true,
-        },
-    },
-
-    // ✅ Production build configuration
     build: {
-        manifest: true, // generates manifest.json (for Laravel)
-        outDir: "public/build", // build output path
-        emptyOutDir: true, // clean before new build
+        manifest: true,
+        outDir: "public/build",
+        emptyOutDir: true,
         rollupOptions: {
-            input: {
-                app: resolve(__dirname, "resources/js/app.jsx"),
+            input: ["resources/js/app.jsx", "resources/css/app.css"],
+            output: {
+                // 👇 Force manifest and assets to go directly under /public/build
+                assetFileNames: "assets/[name]-[hash][extname]",
+                chunkFileNames: "assets/[name]-[hash].js",
+                entryFileNames: "assets/[name]-[hash].js",
             },
         },
     },
 
-    // ✅ Path alias for cleaner imports
+    server: {
+        host: "0.0.0.0",
+        port: 5173,
+    },
+
     resolve: {
         alias: {
             "@": "/resources/js",
         },
     },
-
-    // ✅ Cleaner logs
-    logLevel: "info",
-}));
+});
