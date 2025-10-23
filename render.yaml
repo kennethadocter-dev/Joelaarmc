@@ -9,7 +9,9 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
 
-    # Render will scan for port 8080 since we EXPOSE it in the Dockerfile
+    # ✅ Render scans automatically for port 8080 (as exposed in Dockerfile)
+    autoDeploy: true
+
     envVars:
       # 🌍 App Configuration
       - key: APP_ENV
@@ -59,7 +61,7 @@ services:
       - key: DB_SSLMODE
         value: require
 
-      # 💻 Session / Cache / Queue
+      # 💻 Cache / Queue / Session
       - key: SESSION_DRIVER
         value: database
       - key: CACHE_STORE
@@ -67,7 +69,7 @@ services:
       - key: QUEUE_CONNECTION
         value: database
 
-      # 📧 Mail Configuration (editable in Render dashboard)
+      # 📧 Mail Configuration
       - key: MAIL_MAILER
         value: smtp
       - key: MAIL_HOST
@@ -103,7 +105,7 @@ services:
       - key: MERCHANT_EMAIL
         value: joelaar.test@gmail.com
 
-      # ☁️ Optional AWS Storage
+      # ☁️ Optional AWS S3 Storage
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
