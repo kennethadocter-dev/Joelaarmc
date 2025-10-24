@@ -48,6 +48,7 @@ class SystemController extends Controller
             'stats' => $stats,
             'basePath' => $this->basePath(),
             'backups' => $this->getAllBackups(),
+            'toast' => session('toast'), // ✅ NEW: Pass toast message to frontend
         ]);
     }
 
@@ -112,9 +113,9 @@ class SystemController extends Controller
                     $host = $dbConfig['host'];
                     $port = $dbConfig['port'];
 
-                    // Use pg_dump
+                    // Try pg_dump first
                     $command = sprintf(
-                        'PGPASSWORD=%s pg_dump -h %s -p %s -U %s -d %s > %s',
+                        'PGPASSWORD=%s pg_dump -h %s -p %s -U %s -d %s > %s 2>&1',
                         escapeshellarg($dbConfig['password']),
                         escapeshellarg($host),
                         escapeshellarg($port),
@@ -123,8 +124,29 @@ class SystemController extends Controller
                         escapeshellarg($backupFile)
                     );
                     shell_exec($command);
+
+                    // 🧩 NEW: Fallback if pg_dump failed or produced empty file
+                    if (!file_exists($backupFile) || filesize($backupFile) === 0) {
+                        \Log::warning('pg_dump failed — using PHP fallback backup for PostgreSQL');
+                        $tables = collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname='public';"))
+                            ->pluck('tablename')->toArray();
+
+                        $dump = "-- Laravel PostgreSQL Fallback Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\n";
+                        foreach ($tables as $table) {
+                            $rows = DB::table($table)->get();
+                            if ($rows->isNotEmpty()) {
+                                foreach ($rows as $row) {
+                                    $columns = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
+                                    $values = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
+                                    $dump .= "INSERT INTO \"$table\" (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ");\n";
+                                }
+                                $dump .= "\n";
+                            }
+                        }
+                        file_put_contents($backupFile, $dump);
+                    }
                 } else {
-                    // ✅ MySQL version
+                    // ✅ MySQL version (unchanged)
                     $dbConfig = config("database.connections.mysql");
                     if (!$dbConfig) throw new \Exception('MySQL configuration missing.');
                     $dbName = $dbConfig['database'];
@@ -171,6 +193,12 @@ class SystemController extends Controller
 
             $files = $this->getAllBackups();
 
+            // ✅ NEW: Flash success toast for frontend
+            session()->flash('toast', [
+                'type' => 'success',
+                'message' => '💾 Backup completed successfully!',
+            ]);
+
             if ($request->expectsJson()) {
                 return response()->json([
                     'success' => true,
@@ -179,21 +207,14 @@ class SystemController extends Controller
                 ]);
             }
 
-            return Inertia::render('Admin/System/Index', [
-                'auth' => ['user' => auth()->user()],
-                'stats' => [
-                    'users' => DB::table('users')->count(),
-                    'customers' => DB::table('customers')->count(),
-                    'loans' => DB::table('loans')->count(),
-                    'payments' => DB::table('payments')->count(),
-                    'last_backup' => $this->getLastBackupTime(),
-                ],
-                'basePath' => $this->basePath(),
-                'backups' => $files,
-            ])->with('success', '✅ Backup completed successfully.');
+            return redirect()->back()->with('success', '✅ Backup completed successfully.');
 
         } catch (\Throwable $e) {
             \Log::error('❌ Backup failed', ['error' => $e->getMessage()]);
+            session()->flash('toast', [
+                'type' => 'error',
+                'message' => '❌ Backup failed: ' . $e->getMessage(),
+            ]);
             return back()->with('error', '❌ Backup failed: ' . $e->getMessage());
         }
     }
@@ -280,8 +301,17 @@ class SystemController extends Controller
                 \App\Helpers\ActivityLogger::log('System Restore', 'Database restored from ' . basename($file) . ' by ' . auth()->user()->name);
             }
 
-            return back()->with('success', '✅ Database restored successfully from ' . basename($file));
+            session()->flash('toast', [
+                'type' => 'success',
+                'message' => '✅ Database restored successfully from ' . basename($file),
+            ]);
+
+            return back()->with('success', '✅ Database restored successfully.');
         } catch (\Throwable $e) {
+            session()->flash('toast', [
+                'type' => 'error',
+                'message' => '❌ Restore failed: ' . $e->getMessage(),
+            ]);
             return back()->with('error', '❌ Restore failed: ' . $e->getMessage());
         }
     }
@@ -314,13 +344,18 @@ class SystemController extends Controller
             Schema::enableForeignKeyConstraints();
             DB::commit();
 
-            if (class_exists(\App\Helpers\ActivityLogger::class)) {
-                \App\Helpers\ActivityLogger::log('System Reset', 'System data cleared by ' . auth()->user()->name . " | Mode: {$keepMode}");
-            }
+            session()->flash('toast', [
+                'type' => 'success',
+                'message' => "✅ All data cleared successfully. Mode: {$keepMode}",
+            ]);
 
             return back()->with('success', "✅ All data cleared successfully. Mode: {$keepMode}");
         } catch (\Throwable $e) {
             DB::rollBack();
+            session()->flash('toast', [
+                'type' => 'error',
+                'message' => '❌ Reset failed: ' . $e->getMessage(),
+            ]);
             return back()->with('error', '❌ Reset failed: ' . $e->getMessage());
         }
     }
