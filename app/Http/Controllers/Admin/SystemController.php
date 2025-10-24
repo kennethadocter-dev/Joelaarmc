@@ -48,7 +48,7 @@ class SystemController extends Controller
             'stats' => $stats,
             'basePath' => $this->basePath(),
             'backups' => $this->getAllBackups(),
-            'toast' => session('toast'), // ✅ shared for frontend display
+            'toast' => session('toast'),
         ]);
     }
 
@@ -106,50 +106,30 @@ class SystemController extends Controller
                 $driver = DB::getDriverName();
 
                 if ($driver === 'pgsql') {
-                    // ✅ PostgreSQL version (with fallback)
+                    // ✅ Pure PHP PostgreSQL backup (works without pg_dump)
                     $dbConfig = config("database.connections.pgsql");
                     $dbName = $dbConfig['database'];
-                    $user = $dbConfig['username'];
-                    $host = $dbConfig['host'];
-                    $port = $dbConfig['port'];
 
-                    // Try pg_dump
-                    $command = sprintf(
-                        'PGPASSWORD=%s pg_dump -h %s -p %s -U %s -d %s > %s 2>&1',
-                        escapeshellarg($dbConfig['password']),
-                        escapeshellarg($host),
-                        escapeshellarg($port),
-                        escapeshellarg($user),
-                        escapeshellarg($dbName),
-                        escapeshellarg($backupFile)
-                    );
-                    shell_exec($command);
+                    $tables = collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname='public';"))
+                        ->pluck('tablename')
+                        ->toArray();
 
-                    // 🧩 Fallback if pg_dump is missing or file empty
-                    if (!file_exists($backupFile) || filesize($backupFile) === 0) {
-                        \Log::warning('⚠️ pg_dump not found — using PHP fallback for PostgreSQL');
+                    if (empty($tables)) throw new \Exception('No PostgreSQL tables found.');
 
-                        $tables = collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname='public';"))
-                            ->pluck('tablename')
-                            ->toArray();
-
-                        if (empty($tables)) throw new \Exception('No PostgreSQL tables found.');
-
-                        $dump = "-- Laravel PostgreSQL Fallback Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\n";
-                        foreach ($tables as $table) {
-                            $rows = DB::table($table)->get();
-                            if ($rows->isNotEmpty()) {
-                                $dump .= "TRUNCATE TABLE \"$table\" RESTART IDENTITY CASCADE;\n";
-                                foreach ($rows as $row) {
-                                    $cols = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
-                                    $vals = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
-                                    $dump .= "INSERT INTO \"$table\" (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ");\n";
-                                }
-                                $dump .= "\n";
+                    $dump = "-- Laravel PostgreSQL Pure-PHP Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\n";
+                    foreach ($tables as $table) {
+                        $rows = DB::table($table)->get();
+                        if ($rows->isNotEmpty()) {
+                            $dump .= "TRUNCATE TABLE \"$table\" RESTART IDENTITY CASCADE;\n";
+                            foreach ($rows as $row) {
+                                $cols = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
+                                $vals = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
+                                $dump .= "INSERT INTO \"$table\" (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ");\n";
                             }
+                            $dump .= "\n";
                         }
-                        file_put_contents($backupFile, $dump);
                     }
+                    file_put_contents($backupFile, $dump);
                 } else {
                     // ✅ MySQL version
                     $dbConfig = config("database.connections.mysql");
@@ -265,16 +245,9 @@ class SystemController extends Controller
             if ($driver === 'sqlite') {
                 copy($path, database_path('database.sqlite'));
             } elseif ($driver === 'pgsql') {
-                $command = sprintf(
-                    'PGPASSWORD=%s psql -h %s -p %s -U %s -d %s -f %s',
-                    escapeshellarg($db['password']),
-                    escapeshellarg($db['host']),
-                    escapeshellarg($db['port']),
-                    escapeshellarg($db['username']),
-                    escapeshellarg($db['database']),
-                    escapeshellarg($path)
-                );
-                shell_exec($command);
+                // ⚙️ Simple PostgreSQL restore
+                $commands = file_get_contents($path);
+                DB::unprepared($commands);
             } else {
                 $command = sprintf(
                     'mysql -u%s -p%s %s < %s',
