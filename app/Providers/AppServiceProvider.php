@@ -7,6 +7,7 @@ use App\Observers\PaymentObserver;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\URL; // ✅ Add this
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
 use App\Models\User;
@@ -27,9 +28,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        {
-            Payment::observe(PaymentObserver::class);
+        // ✅ Force HTTPS in production to avoid mixed-content errors
+        if (config('app.env') === 'production') {
+            URL::forceScheme('https');
         }
+
+        // 👇 Existing observers
+        Payment::observe(PaymentObserver::class);
+
         // ✅ Prevent string length errors in older MySQL versions
         Schema::defaultStringLength(191);
 
@@ -37,25 +43,18 @@ class AppServiceProvider extends ServiceProvider
         |--------------------------------------------------------------------------
         | 🔐 Authorization Gates (Centralized Access Control)
         |--------------------------------------------------------------------------
-        | Superadmins automatically pass all gates.
-        | Admins & staff get admin access.
-        | Regular users only access their personal area.
-        |--------------------------------------------------------------------------
         */
-
         Gate::define('access-superadmin', function (User $user) {
             return $user->is_super_admin || strtolower($user->role) === 'superadmin';
         });
 
         Gate::define('access-admin', function (User $user) {
-            // Allow admin, staff, or anyone with superadmin privileges
             return in_array(strtolower($user->role), ['admin', 'staff'])
                 || $user->is_super_admin
                 || strtolower($user->role) === 'superadmin';
         });
 
         Gate::define('access-user', function (User $user) {
-            // Allow normal users (and superadmins by default)
             return in_array(strtolower($user->role), ['user', 'customer', 'client'])
                 || $user->is_super_admin
                 || strtolower($user->role) === 'superadmin';
@@ -64,12 +63,6 @@ class AppServiceProvider extends ServiceProvider
         /*
         |--------------------------------------------------------------------------
         | 🌍 Global Inertia Shared Data
-        |--------------------------------------------------------------------------
-        | Ensures every Inertia page has access to:
-        | - Logged-in user info
-        | - Role permissions (via Gate)
-        | - App settings (from DB)
-        | - Flash messages
         |--------------------------------------------------------------------------
         */
         Inertia::share([
@@ -86,14 +79,14 @@ class AppServiceProvider extends ServiceProvider
                 ]
                 : ['user' => null],
 
-            // 🛡️ Role-based permissions (for frontend)
+            // 🛡️ Role-based permissions
             'can' => fn () => [
                 'superadmin' => auth()->user()?->can('access-superadmin') ?? false,
                 'admin'      => auth()->user()?->can('access-admin') ?? false,
                 'user'       => auth()->user()?->can('access-user') ?? false,
             ],
 
-            // ⚙️ Global app settings (once per request)
+            // ⚙️ Global app settings
             'appSettings' => function () {
                 $settings = Setting::first();
                 return [
