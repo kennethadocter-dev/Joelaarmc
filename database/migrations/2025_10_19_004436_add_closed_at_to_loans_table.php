@@ -8,20 +8,15 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('loans', function (Blueprint $table) {
-            // 🕓 Add column only if it doesn't exist
-            if (!Schema::hasColumn('loans', 'closed_at')) {
-                $table->timestamp('closed_at')->nullable()->after('due_date');
-            }
+            Schema::table('email_failures', function (Blueprint $table) {
+            $table->timestamps();
         });
     }
 
     public function down(): void
     {
-        Schema::table('loans', function (Blueprint $table) {
-            if (Schema::hasColumn('loans', 'closed_at')) {
-                $table->dropColumn('closed_at');
-            }
+        Schema::table('email_failures', function (Blueprint $table) {
+            $table->dropTimestamps();
         });
     }
 };
