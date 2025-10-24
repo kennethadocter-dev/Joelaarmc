@@ -48,7 +48,7 @@ class SystemController extends Controller
             'stats' => $stats,
             'basePath' => $this->basePath(),
             'backups' => $this->getAllBackups(),
-            'toast' => session('toast'), // ✅ NEW: Pass toast message to frontend
+            'toast' => session('toast'), // ✅ shared for frontend display
         ]);
     }
 
@@ -106,14 +106,14 @@ class SystemController extends Controller
                 $driver = DB::getDriverName();
 
                 if ($driver === 'pgsql') {
-                    // ✅ PostgreSQL version
+                    // ✅ PostgreSQL version (with fallback)
                     $dbConfig = config("database.connections.pgsql");
                     $dbName = $dbConfig['database'];
                     $user = $dbConfig['username'];
                     $host = $dbConfig['host'];
                     $port = $dbConfig['port'];
 
-                    // Try pg_dump first
+                    // Try pg_dump
                     $command = sprintf(
                         'PGPASSWORD=%s pg_dump -h %s -p %s -U %s -d %s > %s 2>&1',
                         escapeshellarg($dbConfig['password']),
@@ -125,20 +125,25 @@ class SystemController extends Controller
                     );
                     shell_exec($command);
 
-                    // 🧩 NEW: Fallback if pg_dump failed or produced empty file
+                    // 🧩 Fallback if pg_dump is missing or file empty
                     if (!file_exists($backupFile) || filesize($backupFile) === 0) {
-                        \Log::warning('pg_dump failed — using PHP fallback backup for PostgreSQL');
+                        \Log::warning('⚠️ pg_dump not found — using PHP fallback for PostgreSQL');
+
                         $tables = collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname='public';"))
-                            ->pluck('tablename')->toArray();
+                            ->pluck('tablename')
+                            ->toArray();
+
+                        if (empty($tables)) throw new \Exception('No PostgreSQL tables found.');
 
                         $dump = "-- Laravel PostgreSQL Fallback Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\n";
                         foreach ($tables as $table) {
                             $rows = DB::table($table)->get();
                             if ($rows->isNotEmpty()) {
+                                $dump .= "TRUNCATE TABLE \"$table\" RESTART IDENTITY CASCADE;\n";
                                 foreach ($rows as $row) {
-                                    $columns = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
-                                    $values = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
-                                    $dump .= "INSERT INTO \"$table\" (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ");\n";
+                                    $cols = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
+                                    $vals = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
+                                    $dump .= "INSERT INTO \"$table\" (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ");\n";
                                 }
                                 $dump .= "\n";
                             }
@@ -146,18 +151,14 @@ class SystemController extends Controller
                         file_put_contents($backupFile, $dump);
                     }
                 } else {
-                    // ✅ MySQL version (unchanged)
+                    // ✅ MySQL version
                     $dbConfig = config("database.connections.mysql");
                     if (!$dbConfig) throw new \Exception('MySQL configuration missing.');
                     $dbName = $dbConfig['database'];
 
-                    $tables = DB::getDriverName() === 'pgsql'
-                        ? collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname = 'public';"))
-                            ->pluck('tablename')
-                            ->toArray()
-                        : collect(DB::select('SHOW TABLES'))
-                            ->map(fn($t) => array_values((array)$t)[0])
-                            ->toArray();
+                    $tables = collect(DB::select('SHOW TABLES'))
+                        ->map(fn($t) => array_values((array)$t)[0])
+                        ->toArray();
 
                     if (empty($tables)) throw new \Exception('No tables found in database.');
 
@@ -191,24 +192,12 @@ class SystemController extends Controller
                 \App\Helpers\ActivityLogger::log('System Backup', 'Database backup created by ' . auth()->user()->name . ' (' . basename($backupFile) . ')');
             }
 
-            $files = $this->getAllBackups();
-
-            // ✅ NEW: Flash success toast for frontend
             session()->flash('toast', [
                 'type' => 'success',
                 'message' => '💾 Backup completed successfully!',
             ]);
 
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'success' => true,
-                    'message' => '✅ Backup completed successfully.',
-                    'backups' => $files,
-                ]);
-            }
-
-            return redirect()->back()->with('success', '✅ Backup completed successfully.');
-
+            return back()->with('success', '✅ Backup completed successfully.');
         } catch (\Throwable $e) {
             \Log::error('❌ Backup failed', ['error' => $e->getMessage()]);
             session()->flash('toast', [
@@ -295,10 +284,6 @@ class SystemController extends Controller
                     escapeshellarg($path)
                 );
                 shell_exec($command);
-            }
-
-            if (class_exists(\App\Helpers\ActivityLogger::class)) {
-                \App\Helpers\ActivityLogger::log('System Restore', 'Database restored from ' . basename($file) . ' by ' . auth()->user()->name);
             }
 
             session()->flash('toast', [

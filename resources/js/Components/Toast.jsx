@@ -1,27 +1,25 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 
-export default function Toast({ message, type = "success", onClose }) {
+export default function Toast({ type, message }) {
     const [visible, setVisible] = useState(true);
 
     useEffect(() => {
-        const timer = setTimeout(() => {
-            setVisible(false);
-            if (onClose) onClose();
-        }, 3000);
+        const timer = setTimeout(() => setVisible(false), 4000);
         return () => clearTimeout(timer);
     }, []);
 
     if (!visible || !message) return null;
 
+    const bgColor =
+        type === "success"
+            ? "bg-green-600"
+            : type === "error"
+              ? "bg-red-600"
+              : "bg-gray-700";
+
     return (
         <div
-            className={`fixed top-5 right-5 z-50 px-4 py-2 rounded-lg shadow-lg text-white text-sm font-semibold transition-opacity ${
-                type === "error"
-                    ? "bg-red-600"
-                    : type === "warning"
-                      ? "bg-yellow-500"
-                      : "bg-green-600"
-            }`}
+            className={`${bgColor} fixed bottom-6 right-6 text-white px-4 py-3 rounded-lg shadow-lg z-50 transition-all`}
         >
             {message}
         </div>
