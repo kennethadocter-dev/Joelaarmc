@@ -10,7 +10,6 @@ export default function Login({ status, canResetPassword }) {
     const { settings } = usePage().props;
     const companyName = settings?.company_name || "Joelaar Micro-Credit";
 
-    // ✅ Changed "email" to "login" for email/username flexibility
     const { data, setData, post, processing, errors, reset } = useForm({
         login: "",
         password: "",
@@ -22,6 +21,24 @@ export default function Login({ status, canResetPassword }) {
         post(route("login"), {
             onFinish: () => reset("password"),
         });
+    };
+
+    // 🧠 Dynamic password reset routing
+    const getResetRoute = () => {
+        // You can change logic here if you later detect role automatically
+        const url = new URL(window.location.href);
+        const type = url.searchParams.get("type"); // e.g. ?type=admin
+        switch (type) {
+            case "superadmin":
+                return route("superadmin.password.request");
+            case "admin":
+            case "staff":
+                return route("admin.password.request");
+            case "customer":
+                return route("customer.password.request");
+            default:
+                return route("password.request");
+        }
     };
 
     return (
@@ -110,7 +127,7 @@ export default function Login({ status, canResetPassword }) {
 
                         {canResetPassword && (
                             <Link
-                                href={route("password.request")}
+                                href={getResetRoute()}
                                 className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                             >
                                 Forgot password?
@@ -128,7 +145,7 @@ export default function Login({ status, canResetPassword }) {
                         </PrimaryButton>
                     </div>
 
-                    {/* ❗ Visible Login Error (if credentials are wrong) */}
+                    {/* ❗ Visible Login Error */}
                     {(errors.login || errors.email) && (
                         <div className="text-red-600 text-center text-sm font-medium mt-3">
                             ⚠️ Invalid credentials. Please check your
