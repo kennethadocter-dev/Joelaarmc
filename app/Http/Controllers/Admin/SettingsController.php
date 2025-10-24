@@ -53,11 +53,12 @@ class SettingsController extends Controller
     }
 
     /**
-     * 💾 Update Settings
+     * 💾 Update Settings (Flexible for partial updates + Inertia safe)
      */
     public function update(Request $request)
     {
         try {
+            // All fields are optional to prevent validation blocking
             $validated = $request->validate([
                 'company_name'          => 'nullable|string|max:255',
                 'address'               => 'nullable|string|max:2000',
@@ -67,18 +68,20 @@ class SettingsController extends Controller
                 'bank_account_number'   => 'nullable|string|max:255',
                 'manager_name'          => 'nullable|string|max:255',
                 'manager_title'         => 'nullable|string|max:255',
-                'default_interest_rate' => 'required|numeric|min:0',
-                'default_term_months'   => 'required|integer|min:1|max:36',
-                'default_penalty_rate'  => 'required|numeric|min:0',
-                'grace_period_days'     => 'required|integer|min:0|max:60',
-                'allow_early_repayment' => 'required|boolean',
+                'default_interest_rate' => 'nullable|numeric|min:0',
+                'default_term_months'   => 'nullable|integer|min:1|max:36',
+                'default_penalty_rate'  => 'nullable|numeric|min:0',
+                'grace_period_days'     => 'nullable|integer|min:0|max:60',
+                'allow_early_repayment' => 'nullable|boolean',
             ]);
 
+            // Update or create the settings record
             $settings = Setting::firstOrCreate([]);
-            $settings->fill($validated)->save();
+            $settings->fill(array_filter($validated, fn($v) => !is_null($v)))->save();
 
             ActivityLogger::log('Updated Settings', 'Settings updated by ' . Auth::user()->name);
 
+            // ✅ Flash message to Inertia frontend
             return back()->with('success', '✅ Settings updated successfully.');
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to update settings.');

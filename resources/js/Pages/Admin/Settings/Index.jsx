@@ -1,9 +1,10 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, usePage, router } from "@inertiajs/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function SettingsIndex() {
     const { settings, flash } = usePage().props;
+    const [showConfirm, setShowConfirm] = useState(false);
 
     const { data, setData, post, processing, errors } = useForm({
         company_name: settings.company_name || "",
@@ -25,6 +26,16 @@ export default function SettingsIndex() {
     const submit = (e) => {
         e.preventDefault();
         post(route("settings.update"), { forceFormData: true });
+    };
+
+    const handleReset = () => {
+        router.put(
+            route("settings.reset"),
+            {},
+            {
+                onFinish: () => setShowConfirm(false),
+            },
+        );
     };
 
     // 🎉 Flash notifications
@@ -147,15 +158,7 @@ export default function SettingsIndex() {
                     <div className="flex justify-between items-center">
                         <button
                             type="button"
-                            onClick={() => {
-                                if (
-                                    confirm(
-                                        "Are you sure you want to reset all settings to default values?",
-                                    )
-                                ) {
-                                    router.put(route("settings.reset"));
-                                }
-                            }}
+                            onClick={() => setShowConfirm(true)}
                             className="px-6 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition shadow"
                         >
                             ♻️ Reset to Defaults
@@ -171,6 +174,38 @@ export default function SettingsIndex() {
                     </div>
                 </form>
             </div>
+
+            {/* 🔒 Custom Confirmation Modal */}
+            {showConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full space-y-4 text-center">
+                        <h3 className="text-lg font-semibold text-gray-800">
+                            Reset Settings
+                        </h3>
+                        <p className="text-gray-600">
+                            Are you sure you want to reset all settings to
+                            default values? <br />
+                            <span className="text-sm text-gray-500">
+                                This action cannot be undone.
+                            </span>
+                        </p>
+                        <div className="flex justify-center gap-4 mt-4">
+                            <button
+                                onClick={handleReset}
+                                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
+                            >
+                                Yes, Reset
+                            </button>
+                            <button
+                                onClick={() => setShowConfirm(false)}
+                                className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400 transition"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </AuthenticatedLayout>
     );
 }
