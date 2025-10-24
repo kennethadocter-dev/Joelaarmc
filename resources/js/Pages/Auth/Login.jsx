@@ -10,8 +10,9 @@ export default function Login({ status, canResetPassword }) {
     const { settings } = usePage().props;
     const companyName = settings?.company_name || "Joelaar Micro-Credit";
 
+    // 🧩 Changed "email" to "login" so backend can detect email or username
     const { data, setData, post, processing, errors, reset } = useForm({
-        email: "",
+        login: "",
         password: "",
         remember: false,
     });
@@ -58,20 +59,21 @@ export default function Login({ status, canResetPassword }) {
 
                 {/* Login Form */}
                 <form onSubmit={submit} className="space-y-4">
-                    {/* Email */}
+                    {/* Email / Username */}
                     <div>
-                        <InputLabel htmlFor="email" value="Email" />
+                        {/* 🧩 Label changed to reflect new logic */}
+                        <InputLabel htmlFor="login" value="Email or Username" />
                         <TextInput
-                            id="email"
-                            type="email"
-                            name="email"
-                            value={data.email}
+                            id="login"
+                            type="text"
+                            name="login"
+                            value={data.login}
                             className="mt-1 block w-full"
                             autoComplete="username"
                             isFocused
-                            onChange={(e) => setData("email", e.target.value)}
+                            onChange={(e) => setData("login", e.target.value)}
                         />
-                        <InputError message={errors.email} className="mt-2" />
+                        <InputError message={errors.login} className="mt-2" />
                     </div>
 
                     {/* Password */}
