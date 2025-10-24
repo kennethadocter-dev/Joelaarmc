@@ -83,18 +83,15 @@ class SystemController extends Controller
     }
 
     /**
-     * 💾 Create new backup (SQLite & MySQL supported — instant frontend refresh)
+     * 💾 Create new backup (SQLite, MySQL & PostgreSQL supported)
      */
     public function backupData(Request $request)
     {
-        \Log::info("⚡ backupData() route triggered by " . (auth()->user()->email ?? 'guest'));
+        \Log::info("⚡ backupData() triggered by " . (auth()->user()->email ?? 'guest'));
 
         try {
             $backupDir = storage_path('app/backups');
-            if (!file_exists($backupDir)) {
-                mkdir($backupDir, 0755, true);
-                \Log::info("📁 Backup directory created: {$backupDir}");
-            }
+            if (!file_exists($backupDir)) mkdir($backupDir, 0755, true);
 
             $timestamp = now()->format('Y-m-d_H-i-s');
             $connection = config('database.default');
@@ -105,33 +102,61 @@ class SystemController extends Controller
                 if (!file_exists($dbPath)) throw new \Exception('SQLite database file not found.');
                 copy($dbPath, $backupFile);
             } else {
-                $dbConfig = config("database.connections.mysql");
-                if (!$dbConfig) throw new \Exception('MySQL configuration missing.');
+                $driver = DB::getDriverName();
 
-                $dbName = $dbConfig['database'];
-                $tables = DB::select('SHOW TABLES');
-                if (empty($tables)) throw new \Exception('No tables found in MySQL database.');
-                $tableKey = array_keys((array)$tables[0])[0];
+                if ($driver === 'pgsql') {
+                    // ✅ PostgreSQL version
+                    $dbConfig = config("database.connections.pgsql");
+                    $dbName = $dbConfig['database'];
+                    $user = $dbConfig['username'];
+                    $host = $dbConfig['host'];
+                    $port = $dbConfig['port'];
 
-                $dump = "-- Laravel Auto Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\nSET FOREIGN_KEY_CHECKS=0;\n\n";
-                foreach ($tables as $tableObj) {
-                    $table = $tableObj->$tableKey ?? null;
-                    if (!$table) continue;
-                    $create = DB::select("SHOW CREATE TABLE `$table`")[0]->{'Create Table'};
-                    $dump .= "DROP TABLE IF EXISTS `$table`;\n$create;\n\n";
+                    // Use pg_dump
+                    $command = sprintf(
+                        'PGPASSWORD=%s pg_dump -h %s -p %s -U %s -d %s > %s',
+                        escapeshellarg($dbConfig['password']),
+                        escapeshellarg($host),
+                        escapeshellarg($port),
+                        escapeshellarg($user),
+                        escapeshellarg($dbName),
+                        escapeshellarg($backupFile)
+                    );
+                    shell_exec($command);
+                } else {
+                    // ✅ MySQL version
+                    $dbConfig = config("database.connections.mysql");
+                    if (!$dbConfig) throw new \Exception('MySQL configuration missing.');
+                    $dbName = $dbConfig['database'];
 
-                    $rows = DB::table($table)->get();
-                    if ($rows->isNotEmpty()) {
-                        foreach ($rows as $row) {
-                            $columns = array_map(fn($c) => "`$c`", array_keys((array)$row));
-                            $values = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
-                            $dump .= "INSERT INTO `$table` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ");\n";
+                    $tables = DB::getDriverName() === 'pgsql'
+                        ? collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname = 'public';"))
+                            ->pluck('tablename')
+                            ->toArray()
+                        : collect(DB::select('SHOW TABLES'))
+                            ->map(fn($t) => array_values((array)$t)[0])
+                            ->toArray();
+
+                    if (empty($tables)) throw new \Exception('No tables found in database.');
+
+                    $dump = "-- Laravel Auto Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\nSET FOREIGN_KEY_CHECKS=0;\n\n";
+                    foreach ($tables as $table) {
+                        $create = DB::select("SHOW CREATE TABLE `$table`")[0]->{'Create Table'};
+                        $dump .= "DROP TABLE IF EXISTS `$table`;\n$create;\n\n";
+
+                        $rows = DB::table($table)->get();
+                        if ($rows->isNotEmpty()) {
+                            foreach ($rows as $row) {
+                                $columns = array_map(fn($c) => "`$c`", array_keys((array)$row));
+                                $values = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
+                                $dump .= "INSERT INTO `$table` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ");\n";
+                            }
+                            $dump .= "\n";
                         }
-                        $dump .= "\n";
                     }
+                    $dump .= "SET FOREIGN_KEY_CHECKS=1;\n";
+                    file_put_contents($backupFile, $dump);
                 }
-                $dump .= "SET FOREIGN_KEY_CHECKS=1;\n";
-                file_put_contents($backupFile, $dump);
             }
 
             if (!file_exists($backupFile) || filesize($backupFile) === 0) {
@@ -144,10 +169,9 @@ class SystemController extends Controller
                 \App\Helpers\ActivityLogger::log('System Backup', 'Database backup created by ' . auth()->user()->name . ' (' . basename($backupFile) . ')');
             }
 
-            // ✅ Unified Response (JSON or Inertia)
             $files = $this->getAllBackups();
 
-            if ($request->expectsJson() || $request->wantsJson()) {
+            if ($request->expectsJson()) {
                 return response()->json([
                     'success' => true,
                     'message' => '✅ Backup completed successfully.',
@@ -170,12 +194,6 @@ class SystemController extends Controller
 
         } catch (\Throwable $e) {
             \Log::error('❌ Backup failed', ['error' => $e->getMessage()]);
-            if ($request->expectsJson() || $request->wantsJson()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => '❌ Backup failed: ' . $e->getMessage(),
-                ], 500);
-            }
             return back()->with('error', '❌ Backup failed: ' . $e->getMessage());
         }
     }
@@ -186,9 +204,7 @@ class SystemController extends Controller
         $files = collect(glob("$dir/*"))
             ->sortByDesc(fn($f) => filemtime($f))
             ->skip(5);
-        foreach ($files as $oldFile) {
-            @unlink($oldFile);
-        }
+        foreach ($files as $oldFile) @unlink($oldFile);
     }
 
     /** 📋 List all available backup files */
@@ -209,22 +225,9 @@ class SystemController extends Controller
                 \App\Helpers\ActivityLogger::log('Delete Backup', "Backup file {$file} deleted by " . auth()->user()->name);
             }
 
-            \Log::info("🗑️ Backup deleted: {$file} by " . auth()->user()->email);
             return back()->with('success', "🗑️ Backup {$file} deleted successfully.");
         } catch (\Throwable $e) {
-            \Log::error('❌ Delete backup failed', ['error' => $e->getMessage()]);
             return back()->with('error', '❌ Failed to delete backup: ' . $e->getMessage());
-        }
-    }
-
-    /** 🔄 Refresh backups list */
-    public function refreshBackups()
-    {
-        try {
-            return response()->json(['success' => true, 'backups' => $this->getAllBackups()]);
-        } catch (\Throwable $e) {
-            \Log::error('❌ Refresh backups failed', ['error' => $e->getMessage()]);
-            return response()->json(['success' => false, 'message' => 'Failed to refresh backups.']);
         }
     }
 
@@ -236,7 +239,7 @@ class SystemController extends Controller
         return response()->download($path);
     }
 
-    /** 🩹 Restore a selected backup file (via modal) */
+    /** 🩹 Restore a selected backup file */
     public function restoreData(Request $request)
     {
         try {
@@ -246,11 +249,23 @@ class SystemController extends Controller
             $path = storage_path("app/backups/{$file}");
             if (!file_exists($path)) throw new \Exception('Selected backup file not found.');
 
-            $connection = config('database.default');
-            if ($connection === 'sqlite') {
+            $driver = DB::getDriverName();
+            $db = config("database.connections.{$driver}");
+
+            if ($driver === 'sqlite') {
                 copy($path, database_path('database.sqlite'));
+            } elseif ($driver === 'pgsql') {
+                $command = sprintf(
+                    'PGPASSWORD=%s psql -h %s -p %s -U %s -d %s -f %s',
+                    escapeshellarg($db['password']),
+                    escapeshellarg($db['host']),
+                    escapeshellarg($db['port']),
+                    escapeshellarg($db['username']),
+                    escapeshellarg($db['database']),
+                    escapeshellarg($path)
+                );
+                shell_exec($command);
             } else {
-                $db = config("database.connections.{$connection}");
                 $command = sprintf(
                     'mysql -u%s -p%s %s < %s',
                     escapeshellarg($db['username']),
@@ -265,10 +280,8 @@ class SystemController extends Controller
                 \App\Helpers\ActivityLogger::log('System Restore', 'Database restored from ' . basename($file) . ' by ' . auth()->user()->name);
             }
 
-            \Log::info("✅ Database restored by " . auth()->user()->email . " | File: " . basename($file));
             return back()->with('success', '✅ Database restored successfully from ' . basename($file));
         } catch (\Throwable $e) {
-            \Log::error('❌ Restore failed', ['error' => $e->getMessage()]);
             return back()->with('error', '❌ Restore failed: ' . $e->getMessage());
         }
     }
@@ -280,6 +293,7 @@ class SystemController extends Controller
             DB::beginTransaction();
             $superadmin = User::where('role', 'superadmin')->first();
             if (!$superadmin) throw new \Exception('No Superadmin found. Reset aborted.');
+
             $keepMode = $request->input('keep', 'superadmin_only');
             Schema::disableForeignKeyConstraints();
 
@@ -287,9 +301,6 @@ class SystemController extends Controller
             foreach ($tables as $table) {
                 if (Schema::hasTable($table)) {
                     DB::table($table)->truncate();
-                    if (DB::getDriverName() !== 'sqlite') {
-                        DB::statement("ALTER TABLE {$table} AUTO_INCREMENT = 1");
-                    }
                 }
             }
 
@@ -310,7 +321,6 @@ class SystemController extends Controller
             return back()->with('success', "✅ All data cleared successfully. Mode: {$keepMode}");
         } catch (\Throwable $e) {
             DB::rollBack();
-            \Log::error('❌ System reset failed', ['error' => $e->getMessage()]);
             return back()->with('error', '❌ Reset failed: ' . $e->getMessage());
         }
     }
@@ -327,7 +337,6 @@ class SystemController extends Controller
             ];
             return response()->json(['success' => true, 'message' => '✅ Data preview loaded successfully.', 'stats' => $stats]);
         } catch (\Throwable $e) {
-            \Log::error('❌ Preview failed', ['error' => $e->getMessage()]);
             return response()->json(['success' => false, 'message' => '❌ Failed to load preview data.'], 500);
         }
     }
