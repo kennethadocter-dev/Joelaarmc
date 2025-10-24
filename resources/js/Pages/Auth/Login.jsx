@@ -10,7 +10,7 @@ export default function Login({ status, canResetPassword }) {
     const { settings } = usePage().props;
     const companyName = settings?.company_name || "Joelaar Micro-Credit";
 
-    // 🧩 Changed "email" to "login" so backend can detect email or username
+    // ✅ Changed "email" to "login" for email/username flexibility
     const { data, setData, post, processing, errors, reset } = useForm({
         login: "",
         password: "",
@@ -27,8 +27,6 @@ export default function Login({ status, canResetPassword }) {
     return (
         <GuestLayout>
             <Head title="Login" />
-
-            {/* ✅ Removed outer logo — only the one inside the card remains */}
 
             <div className="max-w-md mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 space-y-6 mt-16">
                 {/* Logo & Welcome Message */}
@@ -59,9 +57,8 @@ export default function Login({ status, canResetPassword }) {
 
                 {/* Login Form */}
                 <form onSubmit={submit} className="space-y-4">
-                    {/* Email / Username */}
+                    {/* Email or Username */}
                     <div>
-                        {/* 🧩 Label changed to reflect new logic */}
                         <InputLabel htmlFor="login" value="Email or Username" />
                         <TextInput
                             id="login"
@@ -130,6 +127,14 @@ export default function Login({ status, canResetPassword }) {
                             {processing ? "Signing in..." : "Sign In"}
                         </PrimaryButton>
                     </div>
+
+                    {/* ❗ Visible Login Error (if credentials are wrong) */}
+                    {(errors.login || errors.email) && (
+                        <div className="text-red-600 text-center text-sm font-medium mt-3">
+                            ⚠️ Invalid credentials. Please check your
+                            email/username or password.
+                        </div>
+                    )}
                 </form>
 
                 {/* Info Footer */}
