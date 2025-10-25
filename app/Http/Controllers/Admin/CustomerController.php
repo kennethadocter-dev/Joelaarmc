@@ -171,13 +171,17 @@ class CustomerController extends Controller
                 }
 
                 // 💬 SMS: send credentials
-                if (!empty($customer->phone)) {
-                    $msg = "Welcome {$customer->full_name}! 🎉 Your Joelaar login is ready.
-Email: {$user->email}
-Password: {$plainPassword}
-Login: " . url('/login');
-                    SmsNotifier::send($customer->phone, $msg);
-                }
+               if (!empty($customer->phone)) {
+                $settings = \App\Models\Setting::first();
+                $companyName = $settings?->company_name ?? 'Joelaar Micro-Credit';
+
+                $msg = "Welcome {$customer->full_name}! 🎉 Your {$companyName} login is ready.
+            Email: {$user->email}
+            Password: {$plainPassword}
+            Login: " . url('/login');
+
+                SmsNotifier::send($customer->phone, $msg);
+            }
             } catch (\Throwable $e) {
                 Log::warning('⚠️ Failed creating linked user', ['error' => $e->getMessage()]);
             }

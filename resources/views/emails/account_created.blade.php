@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Your {{ $companyName }} Account Details</title>
+    <title>Your Account Details</title>
     <style>
         body {
             font-family: "Segoe UI", Arial, sans-serif;
@@ -24,10 +24,19 @@
             color: #fff;
             padding: 25px;
             text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
         }
         .header img {
             height: 60px;
-            margin-bottom: 10px;
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+            color: #ffffff;
         }
         .content {
             padding: 30px;
@@ -53,15 +62,6 @@
             font-family: monospace;
             font-size: 15px;
         }
-        .button {
-            display: inline-block;
-            padding: 12px 24px;
-            background-color: #2563eb;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: 600;
-        }
         .footer {
             text-align: center;
             color: #777;
@@ -72,27 +72,45 @@
     </style>
 </head>
 <body>
+    @php
+        $settings = \App\Models\Setting::first();
+        $companyName = $settings?->company_name ?? 'Joelaar Micro-Credit';
+    @endphp
+
     <div class="container">
         <div class="header">
-            {{-- 👇 Make sure you have your logo in public/images/logo.png --}}
             <img src="{{ asset('images/logo.png') }}" alt="{{ $companyName }} Logo">
             <h1>{{ $companyName }}</h1>
         </div>
 
         <div class="content">
-            <h2>Hello {{ $name }},</h2>
-            <p>Welcome to <strong>{{ $companyName }}</strong> — your trusted loan and customer management platform.</p>
-            <p>Your account has been successfully created (or your credentials have been reset).</p>
+            <h2>Hello {{ $user->name }},</h2>
+            <p>Your {{ $companyName }} account has been successfully created (or your credentials have been reset).</p>
 
             <p><strong>Login Details:</strong></p>
             <div class="credentials">
-                <p><strong>Email:</strong> {{ $email }}</p>
-                <p><strong>Password:</strong> {{ $password }}</p>
+                <p><strong>Email:</strong> {{ $user->email }}</p>
+                <p><strong>Password:</strong> {{ $plainPassword }}</p>
             </div>
 
             <p>You can log in using the button below:</p>
             <p style="text-align:center;">
-                <a href="{{ $loginUrl }}" class="button">Login to Your Account</a>
+                <a href="{{ $loginUrl }}"
+                   style="
+                       display: inline-block;
+                       padding: 12px 28px;
+                       background-color: #2563eb;
+                       color: #ffffff !important;
+                       text-decoration: none;
+                       border-radius: 8px;
+                       font-weight: 600;
+                       font-size: 16px;
+                       transition: background-color 0.3s ease;
+                   "
+                   onmouseover="this.style.backgroundColor='#1e40af'"
+                   onmouseout="this.style.backgroundColor='#2563eb'">
+                   Login Now
+                </a>
             </p>
 
             <p style="margin-top: 25px; font-size: 14px;">
@@ -104,8 +122,7 @@
         </div>
 
         <div class="footer">
-            <p>&copy; {{ date('Y') }} {{ $companyName }}. All rights reserved.</p>
-            <p>{{ $companyAddress }} | 📞 {{ $companyPhone }} | ✉️ {{ $companyEmail }}</p>
+            &copy; {{ date('Y') }} {{ $companyName }}. All rights reserved.
         </div>
     </div>
 </body>
