@@ -1,8 +1,7 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useState, useEffect } from "react";
-// If you have react-hot-toast installed, uncomment below:
-// import { toast } from "react-hot-toast";
+// import { toast } from "react-hot-toast"; // optional
 
 export default function LoansIndex() {
     const {
@@ -22,7 +21,7 @@ export default function LoansIndex() {
         ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
         user?.is_super_admin;
 
-    // 🔁 Debounced filter/search
+    // 🔁 Debounced search/filter
     useEffect(() => {
         const t = setTimeout(() => {
             router.get(
@@ -55,7 +54,7 @@ export default function LoansIndex() {
         return diff > 0 ? diff : null;
     };
 
-    // 📊 Summary card
+    // 📊 Summary card component
     const Card = ({ title, sub, count = 0, sum = 0, onView }) => (
         <div className="bg-white rounded-xl shadow-md hover:shadow-lg transition transform hover:scale-[1.02] w-64 p-5 flex flex-col gap-2 border border-gray-100">
             <div className="text-sm font-medium text-gray-500">{title}</div>
@@ -84,24 +83,6 @@ export default function LoansIndex() {
                 return "bg-red-100 text-red-700";
             default:
                 return "bg-gray-100 text-gray-700";
-        }
-    };
-
-    const handleActivate = (loanId) => {
-        if (confirm("Activate this loan?")) {
-            router.post(
-                route(`${basePath}.loans.activate`, loanId),
-                {},
-                {
-                    onSuccess: () => {
-                        router.reload({ only: ["loans"] }); // ✅ refresh loans data
-                        // toast?.success("Loan activated successfully!");
-                        alert("✅ Loan activated successfully!");
-                    },
-                    onError: () =>
-                        alert("❌ Failed to activate. Please try again."),
-                },
-            );
         }
     };
 
@@ -292,31 +273,18 @@ export default function LoansIndex() {
                                                     loan.amount_remaining ?? 0,
                                                 )}
                                             </td>
+
+                                            {/* 🟦 Only View button remains */}
                                             <td className="px-4 py-3 text-sm flex flex-wrap gap-2">
                                                 <Link
                                                     href={route(
                                                         `${basePath}.loans.show`,
                                                         loan.id,
                                                     )}
-                                                    className="text-blue-600 hover:underline"
+                                                    className="px-3 py-1.5 bg-indigo-600 text-white rounded-full text-xs font-semibold hover:bg-indigo-700 transition"
                                                 >
-                                                    View
+                                                    View Loan
                                                 </Link>
-
-                                                {canManage &&
-                                                    loan.status ===
-                                                        "pending" && (
-                                                        <button
-                                                            onClick={() =>
-                                                                handleActivate(
-                                                                    loan.id,
-                                                                )
-                                                            }
-                                                            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-                                                        >
-                                                            Activate
-                                                        </button>
-                                                    )}
                                             </td>
                                         </tr>
                                     );

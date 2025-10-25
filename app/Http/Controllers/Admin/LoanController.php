@@ -238,6 +238,36 @@ class LoanController extends Controller
         }
     }
 
+    /** 👁️ View single loan details */
+    public function show(Loan $loan)
+    {
+        try {
+            $loan->load([
+                'customer',
+                'user',
+                'payments' => fn($q) => $q->orderByDesc('paid_at'),
+                'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
+            ]);
+
+            $totalPaid = $loan->payments->sum('amount');
+            $remaining = max(($loan->amount_remaining ?? 0), 0);
+
+            return Inertia::render('Admin/Loans/Show', [
+                'loan' => $loan,
+                'totalPaid' => $totalPaid,
+                'remaining' => $remaining,
+                'auth' => ['user' => auth()->user()],
+                'basePath' => $this->basePath(),
+                'flash' => [
+                    'success' => session('success'),
+                    'error' => session('error'),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->handleError($e, '⚠️ Failed to load loan details.');
+        }
+    }
+
     /** ✅ Activate loan + Notify customer */
     public function activate(Loan $loan)
     {
