@@ -36,6 +36,7 @@ export default function LoanShow() {
         basePath = "admin",
     } = usePage().props;
 
+    
     if (!initialLoan || Object.keys(initialLoan).length === 0) {
         return (
             <div className="text-center py-20 text-red-600 font-semibold">
