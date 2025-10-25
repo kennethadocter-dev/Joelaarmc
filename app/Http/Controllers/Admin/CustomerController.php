@@ -176,9 +176,9 @@ class CustomerController extends Controller
                 $companyName = $settings?->company_name ?? 'Joelaar Micro-Credit';
 
                 $msg = "Welcome {$customer->full_name}! 🎉 Your {$companyName} login is ready.
-            Email: {$user->email}
-            Password: {$plainPassword}
-            Login: " . url('/login');
+    Email: {$user->email}
+    Password: {$plainPassword}
+    Login: " . url('/login');
 
                 SmsNotifier::send($customer->phone, $msg);
             }
