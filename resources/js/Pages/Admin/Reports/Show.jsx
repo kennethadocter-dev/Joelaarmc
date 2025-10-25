@@ -1,7 +1,8 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, Link, usePage } from "@inertiajs/react";
+import { Head, Link, usePage, router } from "@inertiajs/react";
 import { useMemo } from "react";
 import html2pdf from "html2pdf.js";
+import axios from "axios"; // 👈 for fallback refresh
 
 const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
 const fmt = (d) =>
@@ -120,6 +121,21 @@ export default function ReportShow() {
         html2pdf().set(opt).from(element).save();
     };
 
+    /** 🔄 Refresh Button Logic */
+    const handleRefresh = async () => {
+        try {
+            // 🟢 Preferred smooth Inertia reload:
+            router.reload({ only: ["loan", "guarantors"] });
+
+            // 🔸 Optional fallback if router.reload fails:
+            // const res = await axios.get(route(`${basePath}.loans.show`, loan.id));
+            // if (res?.data?.props?.loan) window.location.reload();
+        } catch (err) {
+            console.error("Failed to refresh loan data:", err);
+            alert("⚠️ Could not refresh loan data. Please reload manually.");
+        }
+    };
+
     return (
         <AuthenticatedLayout
             header={
@@ -175,6 +191,14 @@ export default function ReportShow() {
                                 📧 Send Email
                             </button>
                         </form>
+
+                        {/* 🔄 Refresh Data Button */}
+                        <button
+                            onClick={handleRefresh}
+                            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow"
+                        >
+                            🔄 Refresh Data
+                        </button>
                     </div>
                 </div>
 

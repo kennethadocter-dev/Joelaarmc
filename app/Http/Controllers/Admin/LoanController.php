@@ -174,6 +174,9 @@ class LoanController extends Controller
             $multiplier = $interestMultipliers[$term] ?? (1 + $rate / 100);
             $totalDue   = $amount * $multiplier;
 
+            // ✅ Calculate interest portion for dashboard and analytics
+            $interestEarned = round($totalDue - $amount, 2);
+
             $round2 = fn($num) => round($num, 2);
             $installments = [];
             $rawMonthly = $totalDue / $term;
@@ -204,10 +207,12 @@ class LoanController extends Controller
                 'due_date'         => $dueDate,
                 'amount_paid'      => 0.00,
                 'amount_remaining' => $totalDue,
+                'interest_earned'  => $interestEarned, // ✅ NEW: save total expected interest
                 'notes'            => $validated['notes'] ?? null,
                 'status'           => 'pending',
             ]);
 
+            // 📅 Generate monthly schedule with synced remaining amounts
             for ($i = 1; $i <= $term; $i++) {
                 LoanSchedule::create([
                     'loan_id'          => $loan->id,
@@ -215,11 +220,16 @@ class LoanController extends Controller
                     'amount'           => (float)$installments[$i],
                     'amount_paid'      => 0.00,
                     'remaining_amount' => (float)$installments[$i],
-                    'is_paid'          => 0,
+                    'is_paid'          => false,
                     'due_date'         => Carbon::parse($validated['start_date'])->addMonths($i),
                     'note'             => 'Pending',
                 ]);
             }
+
+            // ✅ Sync master loan total after schedules are generated
+            $loan->update([
+                'amount_remaining' => LoanSchedule::where('loan_id', $loan->id)->sum('remaining_amount'),
+            ]);
 
             ActivityLogger::log('Created Loan', "Loan #{$loan->id} created for {$loan->client_name}");
 
@@ -227,9 +237,12 @@ class LoanController extends Controller
             if (!empty($loan->customer?->email)) {
                 Mail::to($loan->customer->email)->send(new LoanCreatedMail($loan));
             }
+
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->client_name}, your loan of ₵" . number_format($loan->amount, 2) .
-                    " has been created successfully and is pending approval. Thank you for choosing us!";
+                    " has been created successfully and is pending approval. " .
+                    "Total repayment: ₵" . number_format($totalDue, 2) .
+                    " across {$loan->term_months} months. Thank you for choosing us!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 

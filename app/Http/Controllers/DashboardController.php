@@ -30,9 +30,7 @@ class DashboardController extends Controller
                 $currentYear = now()->year;
 
                 // 💰 Interest earned
-                $interestEarned = Loan::where(DB::raw('LOWER(status)'), 'paid')
-                    ->get()
-                    ->sum(fn($loan) => ($loan->amount * ($loan->interest_rate ?? 0)) / 100);
+                $interestEarned = Loan::where(DB::raw('LOWER(status)'), 'paid')->sum('interest_earned');
 
                 // 🧾 Pending repayment — use loan_schedules if available
                 $pendingRepayment = 0;

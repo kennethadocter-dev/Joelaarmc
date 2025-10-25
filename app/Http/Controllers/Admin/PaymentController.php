@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Payment;
 use App\Models\Loan;
+use App\Models\LoanSchedule;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
@@ -74,7 +75,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 💾 Store a new payment + send SMS + email */
+    /** 💾 Store a new payment + auto-update schedules + send SMS + email */
     public function store(Request $request)
     {
         try {
@@ -86,19 +87,11 @@ class PaymentController extends Controller
                 'note'      => 'nullable|string|max:500',
             ]);
 
-            $loan = Loan::with('customer')->findOrFail($validated['loan_id']);
-
-            $totalWithInterest = $loan->amount + ($loan->amount * ($loan->interest_rate ?? 0) / 100);
-            $alreadyPaid = Payment::where('loan_id', $loan->id)->sum('amount');
-            $remaining = max($totalWithInterest - $alreadyPaid, 0);
-
-            if ($validated['amount'] > $remaining + 0.009) {
-                $allowed = number_format($remaining, 2);
-                return back()->with('error', "⚠️ Only ₵{$allowed} remaining for this loan.");
-            }
+            $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
 
             DB::beginTransaction();
 
+            /** 💰 Create payment record */
             $payment = Payment::create([
                 'loan_id'        => $loan->id,
                 'received_by'    => auth()->id(),
@@ -109,37 +102,61 @@ class PaymentController extends Controller
                 'note'           => $validated['note'] ?? null,
             ]);
 
-            // Update loan progress
-            $loan->increment('amount_paid', $validated['amount']);
-            $loan->decrement('amount_remaining', $validated['amount']);
+            $remainingPayment = $validated['amount']; // amount left to distribute
 
-            // Mark loan as paid if completed
-            if ($loan->amount_remaining <= 0.01) {
-                $loan->update(['status' => 'paid', 'amount_remaining' => 0]);
+            /** 📅 Apply payment to schedules (oldest unpaid first) */
+            $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
+
+            foreach ($schedules as $schedule) {
+                if ($remainingPayment <= 0) break; // done distributing
+
+                $scheduleBalance = $schedule->remaining_amount;
+
+                if ($scheduleBalance > 0) {
+                    if ($remainingPayment >= $scheduleBalance) {
+                        // Pay off this schedule completely
+                        $schedule->amount_paid += $scheduleBalance;
+                        $remainingPayment -= $scheduleBalance;
+                    } else {
+                        // Partial payment
+                        $schedule->amount_paid += $remainingPayment;
+                        $remainingPayment = 0;
+                    }
+
+                    $schedule->save(); // auto-updates remaining_amount + is_paid (from model boot)
+                }
             }
+
+            /** 📊 Recalculate loan totals after schedule updates */
+            $loan->refresh(); // reload updated relationship
+
+            $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
+            $loan->amount_remaining = $loan->loanSchedules()->sum('remaining_amount');
+            $loan->interest_earned = max(0, $loan->amount_paid - $loan->amount);
+            $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
+            $loan->save();
 
             DB::commit();
 
-            // 📨 SMS: Notify payment
+            /** 📱 SMS Update */
             if (!empty($loan->customer?->phone)) {
-                $remainingBalance = max($loan->amount_remaining, 0);
                 $msg = "Hi {$loan->customer->full_name}, we've received your payment of ₵" .
                     number_format($validated['amount'], 2) .
-                    ". Remaining balance: ₵" . number_format($remainingBalance, 2) .
+                    ". Remaining balance: ₵" . number_format($loan->amount_remaining, 2) .
                     ". Thank you!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
-            // 🏁 If loan fully paid, send final Email + SMS
+            /** 🎉 If loan fully paid, trigger notifications */
             if ($loan->status === 'paid') {
                 ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked as fully paid automatically.");
 
-                // ✅ Send congratulation email if email exists
+                // 📨 Email
                 if (!empty($loan->customer?->email)) {
                     Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
                 }
 
-                // ✅ Send SMS
+                // 📱 SMS
                 if (!empty($loan->customer?->phone)) {
                     $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
                         number_format($loan->amount, 2) .
@@ -152,7 +169,7 @@ class PaymentController extends Controller
 
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
-                ->with('success', '✅ Payment recorded successfully.');
+                ->with('success', '✅ Payment recorded and schedules updated successfully.');
         } catch (\Throwable $e) {
             DB::rollBack();
             return $this->handleError($e, '⚠️ Failed to record payment.');
