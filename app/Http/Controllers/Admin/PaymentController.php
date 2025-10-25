@@ -75,7 +75,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 💾 Store a new payment + update schedules + send SMS + email */
+    /** 💾 Store a new payment + update monthly schedules + notify */
     public function store(Request $request)
     {
         try {
@@ -88,7 +88,6 @@ class PaymentController extends Controller
             ]);
 
             $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
-
             DB::beginTransaction();
 
             /** 💰 Record payment */
@@ -102,29 +101,38 @@ class PaymentController extends Controller
                 'note'           => $validated['note'] ?? null,
             ]);
 
-            /** 📅 Distribute payment across unpaid schedules */
+            /** 📅 Distribute across monthly schedule */
             $remainingPayment = $validated['amount'];
             $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
 
             foreach ($schedules as $schedule) {
                 if ($remainingPayment <= 0) break;
-                $balance = $schedule->remaining_amount;
+
+                $balance = $schedule->remaining_amount ?? ($schedule->amount - $schedule->amount_paid);
 
                 if ($balance > 0) {
                     if ($remainingPayment >= $balance) {
-                        // Fully pay this installment
+                        // Full payment for this schedule
                         $schedule->amount_paid += $balance;
                         $remainingPayment -= $balance;
                     } else {
-                        // Partial payment
+                        // Partial payment for this schedule
                         $schedule->amount_paid += $remainingPayment;
                         $remainingPayment = 0;
                     }
-                    $schedule->save(); // triggers boot() recalculation
+
+                    // 🧮 Recalculate remaining & status
+                    $schedule->remaining_amount = max(0, $schedule->amount - $schedule->amount_paid);
+                    $schedule->is_paid = $schedule->remaining_amount <= 0.01;
+                    $schedule->note = $schedule->is_paid
+                        ? 'Fully paid'
+                        : ($schedule->amount_paid > 0 ? 'Partially paid' : 'Pending');
+
+                    $schedule->save();
                 }
             }
 
-            /** 📊 Recalculate totals after schedule update */
+            /** 📊 Recalculate totals in main loan */
             $loan->refresh();
             $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
             $loan->amount_remaining = $loan->loanSchedules()->sum('remaining_amount');
@@ -134,18 +142,18 @@ class PaymentController extends Controller
 
             DB::commit();
 
-            /** 📱 Notify customer via SMS */
+            /** 📱 Notify customer */
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->customer->full_name}, we've received your payment of ₵" .
                     number_format($validated['amount'], 2) .
                     ". Remaining balance: ₵" . number_format($loan->amount_remaining, 2) .
-                    ". Thank you for your prompt payment!";
+                    ". Thank you for your payment!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
-            /** 🎉 If fully paid, send completion messages */
+            /** 🎉 If fully paid */
             if ($loan->status === 'paid') {
-                ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked as fully paid automatically.");
+                ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked fully paid.");
 
                 if (!empty($loan->customer?->email)) {
                     Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
@@ -154,16 +162,16 @@ class PaymentController extends Controller
                 if (!empty($loan->customer?->phone)) {
                     $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
                         number_format($loan->amount, 2) .
-                        " is now fully paid off. Thank you for being a valued Joelaar customer!";
+                        " is now fully paid. Thank you for being a valued Joelaar customer!";
                     SmsNotifier::send($loan->customer->phone, $msg);
                 }
             }
 
-            ActivityLogger::log('Created Payment', "Payment of ₵{$validated['amount']} recorded for loan #{$loan->id}");
+            ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for loan #{$loan->id}");
 
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
-                ->with('success', '✅ Payment recorded successfully and loan updated.');
+                ->with('success', '✅ Payment recorded successfully and monthly schedule updated.');
         } catch (\Throwable $e) {
             DB::rollBack();
             return $this->handleError($e, '⚠️ Failed to record payment.');
@@ -175,28 +183,23 @@ class PaymentController extends Controller
     {
         try {
             $payment->load(['loan.customer', 'receivedByUser']);
-
             return Inertia::render('Admin/Payments/Show', [
                 'payment' => $payment,
-                'auth'    => ['user' => auth()->user()],
+                'auth' => ['user' => auth()->user()],
             ]);
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to load payment details.');
         }
     }
 
-    /** 🧰 Handle all errors gracefully */
+    /** 🧰 Error handler */
     private function handleError(\Throwable $e, string $message)
     {
-        $user = auth()->user();
         Log::error('❌ PaymentController Error', [
-            'user'  => $user?->email,
-            'route' => request()->path(),
             'error' => $e->getMessage(),
             'trace' => $e->getTraceAsString(),
         ]);
 
-        return redirect()->route($this->basePath() . '.loans.index')
-            ->with('error', $message);
+        return redirect()->route($this->basePath() . '.loans.index')->with('error', $message);
     }
 }
