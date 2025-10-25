@@ -12,14 +12,18 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('email_failures', function (Blueprint $table) {
-            $table->timestamps();
+            if (!Schema::hasColumn('email_failures', 'created_at')) {
+                $table->timestamps();
+            }
         });
     }
 
-    public function down(): void
+public function down(): void
     {
         Schema::table('email_failures', function (Blueprint $table) {
-            $table->dropTimestamps();
+            if (Schema::hasColumn('email_failures', 'created_at')) {
+                $table->dropColumn(['created_at', 'updated_at']);
+            }
         });
     }
 };
