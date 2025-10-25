@@ -2,10 +2,62 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, usePage, router } from "@inertiajs/react";
 import { useEffect, useState } from "react";
 
+// ✅ Simple toast component
+function Toast({ message, type, onClose }) {
+    if (!message) return null;
+    return (
+        <div
+            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded shadow-lg text-white transition-all duration-300 ${
+                type === "error" ? "bg-red-600" : "bg-green-600"
+            }`}
+        >
+            <div className="flex items-center gap-3">
+                <span>{message}</span>
+                <button
+                    onClick={onClose}
+                    className="text-white hover:text-gray-200 font-bold"
+                >
+                    ×
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// ✅ Confirmation modal
+function ConfirmModal({ show, onConfirm, onCancel }) {
+    if (!show) return null;
+    return (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full text-center">
+                <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    ⚠️ Confirm Reset
+                </h2>
+                <p className="text-gray-600 mb-6">
+                    Are you sure you want to reset all settings to their default
+                    values? This action cannot be undone.
+                </p>
+                <div className="flex justify-center gap-4">
+                    <button
+                        onClick={onCancel}
+                        className="px-4 py-2 rounded bg-gray-300 text-gray-800 hover:bg-gray-400 transition"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition"
+                    >
+                        Yes, Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function SettingsIndex() {
-    const { settings, flash } = usePage().props;
-    const [showConfirm, setShowConfirm] = useState(false);
-    const [toast, setToast] = useState(null);
+    const { settings, flash, basePath } = usePage().props;
 
     const { data, setData, post, processing, errors } = useForm({
         company_name: settings.company_name || "",
@@ -24,9 +76,17 @@ export default function SettingsIndex() {
         _method: "put",
     });
 
+    const [toast, setToast] = useState({ message: "", type: "success" });
+    const [showConfirm, setShowConfirm] = useState(false);
+
+    const showToast = (message, type = "success") => {
+        setToast({ message, type });
+        setTimeout(() => setToast({ message: "", type: "success" }), 3500);
+    };
+
     const submit = (e) => {
         e.preventDefault();
-        post(route("settings.update"), {
+        post(route(`${basePath}.settings.update`), {
             forceFormData: true,
             onSuccess: () =>
                 showToast("✅ Settings saved successfully!", "success"),
@@ -36,7 +96,7 @@ export default function SettingsIndex() {
 
     const handleReset = () => {
         router.put(
-            route("settings.reset"),
+            route(`${basePath}.settings.reset`),
             {},
             {
                 onSuccess: () => {
@@ -54,16 +114,11 @@ export default function SettingsIndex() {
         );
     };
 
-    // 🎉 Flash notifications (for backend messages)
+    // 🎉 Flash messages on page load
     useEffect(() => {
         if (flash?.success) showToast(flash.success, "success");
         if (flash?.error) showToast(flash.error, "error");
     }, [flash]);
-
-    const showToast = (message, type = "info") => {
-        setToast({ message, type });
-        setTimeout(() => setToast(null), 4000);
-    };
 
     return (
         <AuthenticatedLayout
@@ -74,6 +129,16 @@ export default function SettingsIndex() {
             }
         >
             <Head title="Settings" />
+            <Toast
+                message={toast.message}
+                type={toast.type}
+                onClose={() => setToast({ message: "", type: "success" })}
+            />
+            <ConfirmModal
+                show={showConfirm}
+                onConfirm={handleReset}
+                onCancel={() => setShowConfirm(false)}
+            />
 
             <div className="py-8 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
                 <form onSubmit={submit} className="space-y-8">
@@ -195,60 +260,11 @@ export default function SettingsIndex() {
                     </div>
                 </form>
             </div>
-
-            {/* 🧱 Custom Confirmation Modal */}
-            {showConfirm && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full transform transition-all scale-100 hover:scale-[1.02]">
-                        <h3 className="text-2xl font-semibold text-gray-800 mb-2">
-                            Reset Settings?
-                        </h3>
-                        <p className="text-gray-600 mb-6 leading-relaxed">
-                            This will restore all settings to their default
-                            values.
-                            <br />
-                            <span className="text-sm text-gray-500">
-                                This action cannot be undone.
-                            </span>
-                        </p>
-
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowConfirm(false)}
-                                className="px-4 py-2 rounded-lg bg-gray-200 text-gray-800 hover:bg-gray-300 transition font-medium"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleReset}
-                                className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition font-medium shadow"
-                            >
-                                Yes, Reset
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* 🍞 Toast Notification */}
-            {toast && (
-                <div
-                    className={`fixed top-6 right-6 px-5 py-3 rounded-lg shadow-lg text-white text-sm font-medium z-50 transition-all duration-300 animate-fadeIn ${
-                        toast.type === "success"
-                            ? "bg-green-600"
-                            : toast.type === "error"
-                              ? "bg-red-600"
-                              : "bg-gray-800"
-                    }`}
-                >
-                    {toast.message}
-                </div>
-            )}
         </AuthenticatedLayout>
     );
 }
 
-/** 🧮 Reusable InputNumber Component */
+// ✅ Helper component for numeric inputs
 function InputNumber({ label, field, data, setData, errors }) {
     return (
         <div>
