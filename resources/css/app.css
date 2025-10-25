@@ -196,3 +196,45 @@ body {
 .dark .stat-card * {
     color: #ffffff !important;
 }
+
+/* =======================================================
+   ✨ MODAL + TOAST ANIMATIONS (for Settings Page)
+   ======================================================= */
+
+/* Fade + scale for modals */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Slide-in for toast messages */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-15px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Smooth fade for modal */
+.animate-fadeIn {
+    animation: fadeIn 0.25s ease-out;
+}
+
+/* Smooth toast pop-in */
+.toast {
+    animation: slideIn 0.35s ease-out;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    padding: 0.75rem 1.25rem;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}

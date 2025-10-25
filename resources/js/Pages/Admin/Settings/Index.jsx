@@ -3,20 +3,11 @@ import { Head, useForm, usePage, router } from "@inertiajs/react";
 import { useEffect, useState } from "react";
 
 export default function SettingsIndex() {
-    const { settings, flash, auth } = usePage().props;
+    const { settings, flash } = usePage().props;
     const [showConfirm, setShowConfirm] = useState(false);
+    const [toast, setToast] = useState(null);
 
-    // Detect role for correct route prefix
-    const isSuperadmin =
-        auth?.user?.is_super_admin || auth?.user?.role === "superadmin";
-    const updateRoute = isSuperadmin
-        ? route("superadmin.settings.update")
-        : route("admin.settings.update");
-    const resetRoute = isSuperadmin
-        ? route("superadmin.settings.reset")
-        : route("admin.settings.reset");
-
-    const { data, setData, processing, errors } = useForm({
+    const { data, setData, post, processing, errors } = useForm({
         company_name: settings.company_name || "",
         address: settings.address || "",
         phone: settings.phone || "",
@@ -30,38 +21,49 @@ export default function SettingsIndex() {
         default_penalty_rate: settings.default_penalty_rate ?? 0.5,
         grace_period_days: settings.grace_period_days ?? 0,
         allow_early_repayment: !!settings.allow_early_repayment,
+        _method: "put",
     });
 
     const submit = (e) => {
         e.preventDefault();
-        router.put(updateRoute, data, {
-            onSuccess: () => {
-                alert("✅ Settings updated successfully!");
-            },
-            onError: (err) => {
-                console.error(err);
-                alert(
-                    "⚠️ Failed to update settings. Check console for details.",
-                );
-            },
+        post(route("settings.update"), {
+            forceFormData: true,
+            onSuccess: () =>
+                showToast("✅ Settings saved successfully!", "success"),
+            onError: () => showToast("⚠️ Failed to save settings.", "error"),
         });
     };
 
     const handleReset = () => {
         router.put(
-            resetRoute,
+            route("settings.reset"),
             {},
             {
-                onFinish: () => setShowConfirm(false),
+                onSuccess: () => {
+                    setShowConfirm(false);
+                    showToast(
+                        "🔁 Settings reset to default values!",
+                        "success",
+                    );
+                },
+                onError: () => {
+                    setShowConfirm(false);
+                    showToast("❌ Failed to reset settings.", "error");
+                },
             },
         );
     };
 
-    // 🎉 Flash notifications
+    // 🎉 Flash notifications (for backend messages)
     useEffect(() => {
-        if (flash?.success) alert(flash.success);
-        if (flash?.error) alert(flash.error);
+        if (flash?.success) showToast(flash.success, "success");
+        if (flash?.error) showToast(flash.error, "error");
     }, [flash]);
+
+    const showToast = (message, type = "info") => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 4000);
+    };
 
     return (
         <AuthenticatedLayout
@@ -196,40 +198,57 @@ export default function SettingsIndex() {
 
             {/* 🧱 Custom Confirmation Modal */}
             {showConfirm && (
-                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-                    <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full space-y-4 text-center">
-                        <h3 className="text-lg font-semibold text-gray-800">
-                            Reset Settings
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full transform transition-all scale-100 hover:scale-[1.02]">
+                        <h3 className="text-2xl font-semibold text-gray-800 mb-2">
+                            Reset Settings?
                         </h3>
-                        <p className="text-gray-600">
-                            Are you sure you want to reset all settings to
-                            default values?
+                        <p className="text-gray-600 mb-6 leading-relaxed">
+                            This will restore all settings to their default
+                            values.
                             <br />
                             <span className="text-sm text-gray-500">
                                 This action cannot be undone.
                             </span>
                         </p>
-                        <div className="flex justify-center gap-4 mt-4">
-                            <button
-                                onClick={handleReset}
-                                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
-                            >
-                                Yes, Reset
-                            </button>
+
+                        <div className="flex justify-end gap-3">
                             <button
                                 onClick={() => setShowConfirm(false)}
-                                className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400 transition"
+                                className="px-4 py-2 rounded-lg bg-gray-200 text-gray-800 hover:bg-gray-300 transition font-medium"
                             >
                                 Cancel
                             </button>
+                            <button
+                                onClick={handleReset}
+                                className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition font-medium shadow"
+                            >
+                                Yes, Reset
+                            </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* 🍞 Toast Notification */}
+            {toast && (
+                <div
+                    className={`fixed top-6 right-6 px-5 py-3 rounded-lg shadow-lg text-white text-sm font-medium z-50 transition-all duration-300 animate-fadeIn ${
+                        toast.type === "success"
+                            ? "bg-green-600"
+                            : toast.type === "error"
+                              ? "bg-red-600"
+                              : "bg-gray-800"
+                    }`}
+                >
+                    {toast.message}
                 </div>
             )}
         </AuthenticatedLayout>
     );
 }
 
+/** 🧮 Reusable InputNumber Component */
 function InputNumber({ label, field, data, setData, errors }) {
     return (
         <div>
