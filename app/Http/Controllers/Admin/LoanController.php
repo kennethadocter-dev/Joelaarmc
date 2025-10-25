@@ -13,6 +13,8 @@ use Inertia\Inertia;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use App\Mail\LoanCreatedMail;
+use App\Mail\LoanActivatedMail;
 use App\Mail\LoanCompletedMail;
 use App\Helpers\ActivityLogger;
 use Illuminate\Support\Facades\Log;
@@ -138,7 +140,7 @@ class LoanController extends Controller
         }
     }
 
-    /** 💾 Store Loan + Generate Schedule + Send SMS */
+    /** 💾 Store Loan + Generate Schedule + Send SMS + Email */
     public function store(Request $request)
     {
         ini_set('max_execution_time', 45);
@@ -221,10 +223,13 @@ class LoanController extends Controller
 
             ActivityLogger::log('Created Loan', "Loan #{$loan->id} created for {$loan->client_name}");
 
-            // 📨 SMS: Notify customer
+            // 📨 Notify customer
+            if (!empty($loan->customer?->email)) {
+                Mail::to($loan->customer->email)->send(new LoanCreatedMail($loan));
+            }
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->client_name}, your loan of ₵" . number_format($loan->amount, 2) .
-                    " has been created successfully and is pending approval. Thank you for choosing Joelaar!";
+                    " has been created successfully and is pending approval. Thank you for choosing us!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
@@ -235,36 +240,6 @@ class LoanController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
             return $this->handleError($e, '⚠️ Loan creation failed.');
-        }
-    }
-
-    /** 👁️ View single loan details */
-    public function show(Loan $loan)
-    {
-        try {
-            $loan->load([
-                'customer',
-                'user',
-                'payments' => fn($q) => $q->orderByDesc('paid_at'),
-                'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
-            ]);
-
-            $totalPaid = $loan->payments->sum('amount');
-            $remaining = max(($loan->amount_remaining ?? 0), 0);
-
-            return Inertia::render('Admin/Loans/Show', [
-                'loan' => $loan,
-                'totalPaid' => $totalPaid,
-                'remaining' => $remaining,
-                'auth' => ['user' => auth()->user()],
-                'basePath' => $this->basePath(),
-                'flash' => [
-                    'success' => session('success'),
-                    'error' => session('error'),
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load loan details.');
         }
     }
 
@@ -289,9 +264,12 @@ class LoanController extends Controller
 
             ActivityLogger::log('Activated Loan', "Loan #{$loan->id} activated by {$me->name}");
 
-            // 📨 SMS: Loan activation
+            // 📨 Notify customer
+            if (!empty($loan->customer?->email)) {
+                Mail::to($loan->customer->email)->send(new LoanActivatedMail($loan));
+            }
             if (!empty($loan->customer?->phone)) {
-                $msg = "Hi {$loan->client_name}, your loan #{$loan->id} is now active. Please remember to make payments on schedule. Thank you!";
+                $msg = "Hi {$loan->client_name}, your loan #{$loan->id} is now active. Please make payments on schedule. Thank you!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
@@ -345,19 +323,18 @@ class LoanController extends Controller
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
-            // 🕒 Check if fully paid → trigger completion logic
+            // 🕒 Fully paid → trigger completion
             $totalPaid = DB::table('payments')->where('loan_id', $loan->id)->sum('amount');
             if ($totalPaid >= $totalWithInterest - 0.01) {
                 $loan->update(['status' => 'paid', 'amount_remaining' => 0]);
                 ActivityLogger::log('Completed Loan', "Loan #{$loan->id} fully paid automatically.");
 
-                // ✅ Send Loan Completed Email + SMS
                 if (!empty($loan->customer?->email)) {
                     Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
                 }
                 if (!empty($loan->customer?->phone)) {
                     $msg = "🎉 Congratulations {$loan->client_name}! Your loan of ₵" . number_format($loan->amount, 2) .
-                        " is now fully paid off. Thank you for being a valued Joelaar customer!";
+                        " is now fully paid off. Thank you for being a valued customer!";
                     SmsNotifier::send($loan->customer->phone, $msg);
                 }
             }
@@ -384,14 +361,14 @@ class LoanController extends Controller
 
             ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked as fully paid by " . auth()->user()->name);
 
-            // ✅ Send Loan Completed Email + SMS
+            // ✅ Notify customer
             if (!empty($loan->customer?->email)) {
                 Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
             }
 
             if (!empty($loan->customer?->phone)) {
                 $msg = "🎉 Congratulations {$loan->client_name}! Your loan of ₵" . number_format($loan->amount, 2) .
-                    " is now fully paid off. Thank you for being a valued Joelaar customer!";
+                    " is now fully paid off. Thank you for being a valued customer!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 

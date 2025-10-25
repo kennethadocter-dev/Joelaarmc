@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>🎉 Loan Fully Paid - Confirmation</title>
+    <title>New Loan Created - {{ $companyName ?? 'Joelaar Micro-Credit' }}</title>
     <style>
         body {
             font-family: "Segoe UI", Arial, sans-serif;
@@ -82,20 +82,19 @@
         </div>
 
         <div class="content">
-            <h2>🎉 Congratulations {{ $client_name }}!</h2>
-            <p>Your loan with <strong>{{ $companyName }}</strong> has been fully paid.</p>
+            <h2>Hi {{ $loan->client_name }},</h2>
+            <p>Your loan request has been successfully created and is currently pending approval.</p>
 
             <div class="highlight-box">
-                <p><strong>Loan ID:</strong> #{{ $loan->id }}</p>
-                <p><strong>Loan Amount:</strong> ₵{{ $amount }}</p>
-                <p><strong>Status:</strong> Fully Paid ✅</p>
+                <p><strong>Loan Amount:</strong> ₵{{ number_format($loan->amount, 2) }}</p>
+                <p><strong>Term:</strong> {{ $loan->term_months }} months</p>
+                <p><strong>Status:</strong> Pending Approval ⏳</p>
             </div>
 
-            <p>Thank you for your trust and commitment! You are now debt-free with us.  
-            We look forward to assisting you again in the future should you need financial support.</p>
+            <p>Once approved, you will receive another notification and can log in anytime to view your loan details.</p>
 
             <p style="text-align:center; margin-top: 25px;">
-                <a href="{{ $loginUrl }}"
+                <a href="{{ url('/login') }}"
                    style="
                        display: inline-block;
                        padding: 12px 28px;
@@ -114,10 +113,10 @@
             </p>
 
             <p style="margin-top: 25px; font-size: 14px;">
-                <em>Need a new loan or want to check your payment history? Log in anytime to your {{ $companyName }} account.</em>
+                <em>We appreciate your trust in {{ $companyName }}. Please keep an eye on your phone or email for updates.</em>
             </p>
 
-            <p>Warm regards,<br>
+            <p>Best regards,<br>
             <strong>The {{ $companyName }} Team</strong></p>
         </div>
 

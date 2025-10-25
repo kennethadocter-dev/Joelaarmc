@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>🎉 Loan Fully Paid - Confirmation</title>
+    <title>Loan Activated - {{ $companyName ?? 'Joelaar Micro-Credit' }}</title>
     <style>
         body {
             font-family: "Segoe UI", Arial, sans-serif;
@@ -82,20 +82,20 @@
         </div>
 
         <div class="content">
-            <h2>🎉 Congratulations {{ $client_name }}!</h2>
-            <p>Your loan with <strong>{{ $companyName }}</strong> has been fully paid.</p>
+            <h2>Hi {{ $loan->client_name }},</h2>
+            <p>🎉 Great news! Your loan has been successfully approved and activated.</p>
 
             <div class="highlight-box">
                 <p><strong>Loan ID:</strong> #{{ $loan->id }}</p>
-                <p><strong>Loan Amount:</strong> ₵{{ $amount }}</p>
-                <p><strong>Status:</strong> Fully Paid ✅</p>
+                <p><strong>Amount:</strong> ₵{{ number_format($loan->amount, 2) }}</p>
+                <p><strong>Start Date:</strong> {{ \Carbon\Carbon::parse($loan->start_date)->format('M d, Y') }}</p>
+                <p><strong>Due Date:</strong> {{ \Carbon\Carbon::parse($loan->due_date)->format('M d, Y') }}</p>
             </div>
 
-            <p>Thank you for your trust and commitment! You are now debt-free with us.  
-            We look forward to assisting you again in the future should you need financial support.</p>
+            <p>Please make your payments according to the schedule to avoid overdue charges.</p>
 
             <p style="text-align:center; margin-top: 25px;">
-                <a href="{{ $loginUrl }}"
+                <a href="{{ url('/login') }}"
                    style="
                        display: inline-block;
                        padding: 12px 28px;
@@ -114,10 +114,10 @@
             </p>
 
             <p style="margin-top: 25px; font-size: 14px;">
-                <em>Need a new loan or want to check your payment history? Log in anytime to your {{ $companyName }} account.</em>
+                <em>You can always view your loan details and payment schedule inside your {{ $companyName }} account.</em>
             </p>
 
-            <p>Warm regards,<br>
+            <p>Best regards,<br>
             <strong>The {{ $companyName }} Team</strong></p>
         </div>
 

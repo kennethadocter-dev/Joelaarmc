@@ -8,19 +8,25 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\Loan;
 use App\Models\Setting;
 
-class LoanCompletedMail extends Mailable
+class LoanActivatedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public $loan;
     public $settings;
 
+    /**
+     * Create a new message instance.
+     */
     public function __construct(Loan $loan)
     {
         $this->loan = $loan;
         $this->settings = Setting::first();
     }
 
+    /**
+     * Build the message.
+     */
     public function build()
     {
         $companyName = $this->settings->company_name ?? 'Joelaar Micro-Credit';
@@ -28,17 +34,15 @@ class LoanCompletedMail extends Mailable
         $fromName = $this->settings->manager_name ?? $companyName;
 
         return $this->from($companyEmail, $fromName)
-            ->subject("🎉 Loan Fully Paid - {$companyName}")
-            ->view('emails.loan_completed')
+            ->subject("✅ Loan Activated - {$companyName}")
+            ->view('emails.loan_activated')
             ->with([
                 'loan'           => $this->loan,
                 'client_name'    => $this->loan->client_name,
-                'amount'         => number_format($this->loan->amount, 2),
                 'companyName'    => $companyName,
                 'companyPhone'   => $this->settings->phone ?? '+233000000000',
                 'companyEmail'   => $companyEmail,
                 'companyAddress' => $this->settings->address ?? 'Accra, Ghana',
-                'loginUrl'       => url('/login'),
             ]);
     }
 }

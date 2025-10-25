@@ -19,7 +19,6 @@ function buildPreviewSchedule(amount, ratePct, term, startDate) {
         5: 1.67,
         6: 1.83,
     };
-
     const multiplier = multipliers[termInt] ?? 1 + ratePct / 100;
     const total = principal * multiplier;
     const ceil2 = (n) => Math.ceil(n * 100) / 100;
@@ -79,7 +78,7 @@ export default function Create() {
         user_id: loggedInUser?.id || "",
         customer_id: prefill_customer_id || "",
         client_name: prefill_client_name || "",
-        amount: suggested_amount ? parseFloat(suggested_amount) : "",
+        amount: suggested_amount ? parseFloat(suggested_amount) : "", // 💡 prefilled but editable
         interest_rate: defaults?.interest_rate
             ? parseFloat(defaults.interest_rate)
             : "",
@@ -155,28 +154,11 @@ export default function Create() {
                     </div>
                 )}
 
-                {/* Missing client notice */}
                 {missingCustomer ? (
-                    <div className="bg-yellow-50 border border-yellow-300 p-6 rounded-lg">
-                        <h3 className="font-semibold text-yellow-800 mb-2">
-                            Client Not Selected
-                        </h3>
-                        <p className="text-yellow-700">
-                            Please select or register a customer before creating
-                            a loan.
-                        </p>
-                        <div className="mt-4">
-                            <Link
-                                href={route(`${basePath}.customers.index`)}
-                                className="inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                            >
-                                ← Back to Customers
-                            </Link>
-                        </div>
-                    </div>
+                    <MissingCustomerNotice basePath={basePath} />
                 ) : (
                     <div className="bg-white shadow-lg rounded-lg p-6">
-                        {/* Client header */}
+                        {/* Header */}
                         <div className="mb-5 flex justify-end">
                             <button
                                 type="button"
@@ -192,43 +174,19 @@ export default function Create() {
                         </div>
 
                         {/* Summary */}
-                        <div className="mb-6 p-4 bg-gray-100 rounded-lg border border-gray-300 grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                            <div>
-                                <p className="text-sm text-gray-600">
-                                    Total Due
-                                </p>
-                                <p className="text-xl font-bold text-blue-700">
-                                    ₵{Math.ceil(totalDue).toFixed(2)}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-600">
-                                    Monthly Payment
-                                </p>
-                                <p className="text-xl font-bold text-green-700">
-                                    ₵{Math.ceil(monthly).toFixed(2)}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-600">
-                                    Interest Rate
-                                </p>
-                                <p className="text-xl font-bold text-indigo-700">
-                                    {data.interest_rate || 0}%
-                                </p>
-                            </div>
-                        </div>
+                        <SummaryCard
+                            totalDue={totalDue}
+                            monthly={monthly}
+                            rate={data.interest_rate}
+                        />
 
-                        {/* Loan Form */}
+                        {/* Form */}
                         <form onSubmit={handleSubmit} className="space-y-5">
-                            {/* Staff */}
                             <Field
                                 label="Borrower (Staff)"
                                 value={loggedInUser?.name || ""}
                                 readOnly
                             />
-
-                            {/* Client */}
                             <Field
                                 label="Client Name"
                                 value={data.client_name}
@@ -240,7 +198,6 @@ export default function Create() {
                                 value={data.customer_id}
                             />
 
-                            {/* Amount */}
                             <Field
                                 label="Amount (₵)"
                                 type="number"
@@ -256,7 +213,6 @@ export default function Create() {
                                 required
                             />
 
-                            {/* Interest Rate */}
                             <Field
                                 label="Interest Rate (%)"
                                 type="number"
@@ -272,7 +228,6 @@ export default function Create() {
                                 required
                             />
 
-                            {/* Term */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <SelectField
                                     label="Term (months)"
@@ -306,75 +261,11 @@ export default function Create() {
                                 />
                             </div>
 
-                            {/* Schedule */}
-                            <div className="border-t pt-5">
-                                <div className="flex justify-between items-center">
-                                    <h3 className="font-semibold text-gray-800">
-                                        Monthly Payment Schedule
-                                    </h3>
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            setShowSchedule((prev) => !prev)
-                                        }
-                                        className="force-white bg-gray-800 px-3 py-1.5 rounded-md text-sm hover:bg-gray-900 transition"
-                                    >
-                                        {showSchedule
-                                            ? "Hide Schedule ▲"
-                                            : "Show Schedule ▼"}
-                                    </button>
-                                </div>
-
-                                {showSchedule && (
-                                    <>
-                                        {preview.length ? (
-                                            <div className="overflow-x-auto mt-3">
-                                                <table className="min-w-full text-sm bg-gray-50 rounded">
-                                                    <thead>
-                                                        <tr className="text-gray-800">
-                                                            <th className="px-4 py-2 text-left">
-                                                                Payment
-                                                            </th>
-                                                            <th className="px-4 py-2 text-left">
-                                                                Amount
-                                                            </th>
-                                                            <th className="px-4 py-2 text-left">
-                                                                Due Date
-                                                            </th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {preview.map((p) => (
-                                                            <tr
-                                                                key={p.month}
-                                                                className="border-t"
-                                                            >
-                                                                <td className="px-4 py-2">
-                                                                    {p.label}
-                                                                </td>
-                                                                <td className="px-4 py-2">
-                                                                    ₵
-                                                                    {p.installment.toFixed(
-                                                                        2,
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-4 py-2">
-                                                                    {p.due_date}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        ) : (
-                                            <p className="text-gray-600 mt-3">
-                                                Enter amount, rate, and term to
-                                                preview schedule.
-                                            </p>
-                                        )}
-                                    </>
-                                )}
-                            </div>
+                            <ScheduleTable
+                                show={showSchedule}
+                                toggle={() => setShowSchedule((p) => !p)}
+                                preview={preview}
+                            />
 
                             {/* Notes */}
                             <div>
@@ -416,7 +307,7 @@ export default function Create() {
     );
 }
 
-/* 🔹 Helpers */
+/* 🔹 Reusable Components */
 function Field({ label, value, onChange, type = "text", required, readOnly }) {
     return (
         <div>
@@ -452,6 +343,114 @@ function SelectField({ label, value, onChange, options }) {
                     </option>
                 ))}
             </select>
+        </div>
+    );
+}
+
+function SummaryCard({ totalDue, monthly, rate }) {
+    return (
+        <div className="mb-6 p-4 bg-gray-100 rounded-lg border border-gray-300 grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+            <div>
+                <p className="text-sm text-gray-600">Total Due</p>
+                <p className="text-xl font-bold text-blue-700">
+                    ₵{Math.ceil(totalDue).toFixed(2)}
+                </p>
+            </div>
+            <div>
+                <p className="text-sm text-gray-600">Monthly Payment</p>
+                <p className="text-xl font-bold text-green-700">
+                    ₵{Math.ceil(monthly).toFixed(2)}
+                </p>
+            </div>
+            <div>
+                <p className="text-sm text-gray-600">Interest Rate</p>
+                <p className="text-xl font-bold text-indigo-700">
+                    {rate || 0}%
+                </p>
+            </div>
+        </div>
+    );
+}
+
+function ScheduleTable({ show, toggle, preview }) {
+    return (
+        <div className="border-t pt-5">
+            <div className="flex justify-between items-center">
+                <h3 className="font-semibold text-gray-800">
+                    Monthly Payment Schedule
+                </h3>
+                <button
+                    type="button"
+                    onClick={toggle}
+                    className="bg-gray-800 px-3 py-1.5 rounded-md text-sm text-white hover:bg-gray-900 transition"
+                >
+                    {show ? "Hide Schedule ▲" : "Show Schedule ▼"}
+                </button>
+            </div>
+
+            {show && (
+                <>
+                    {preview.length ? (
+                        <div className="overflow-x-auto mt-3">
+                            <table className="min-w-full text-sm bg-gray-50 rounded">
+                                <thead>
+                                    <tr className="text-gray-800">
+                                        <th className="px-4 py-2 text-left">
+                                            Payment
+                                        </th>
+                                        <th className="px-4 py-2 text-left">
+                                            Amount
+                                        </th>
+                                        <th className="px-4 py-2 text-left">
+                                            Due Date
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {preview.map((p) => (
+                                        <tr key={p.month} className="border-t">
+                                            <td className="px-4 py-2">
+                                                {p.label}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                ₵{p.installment.toFixed(2)}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                {p.due_date}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-gray-600 mt-3">
+                            Enter amount, rate, and term to preview schedule.
+                        </p>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+function MissingCustomerNotice({ basePath }) {
+    return (
+        <div className="bg-yellow-50 border border-yellow-300 p-6 rounded-lg">
+            <h3 className="font-semibold text-yellow-800 mb-2">
+                Client Not Selected
+            </h3>
+            <p className="text-yellow-700">
+                Please select or register a customer before creating a loan.
+            </p>
+            <div className="mt-4">
+                <Link
+                    href={route(`${basePath}.customers.index`)}
+                    className="inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                    ← Back to Customers
+                </Link>
+            </div>
         </div>
     );
 }
