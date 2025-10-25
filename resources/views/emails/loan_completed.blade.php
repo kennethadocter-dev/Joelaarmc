@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Your {{ $companyName }} Account Details</title>
+    <title>Loan Completed — {{ $companyName }}</title>
     <style>
         body {
             font-family: "Segoe UI", Arial, sans-serif;
@@ -37,21 +37,12 @@
             font-size: 22px;
             margin-bottom: 15px;
         }
-        .content p {
-            line-height: 1.6;
-            margin: 10px 0;
-        }
         .credentials {
             background-color: #f3f4f6;
             border-left: 4px solid #2563eb;
             padding: 15px 20px;
             border-radius: 8px;
             margin: 20px 0;
-        }
-        .credentials p {
-            margin: 5px 0;
-            font-family: monospace;
-            font-size: 15px;
         }
         .button {
             display: inline-block;
@@ -74,32 +65,33 @@
 <body>
     <div class="container">
         <div class="header">
-            {{-- 👇 Make sure you have your logo in public/images/logo.png --}}
             <img src="{{ asset('images/logo.png') }}" alt="{{ $companyName }} Logo">
             <h1>{{ $companyName }}</h1>
         </div>
 
         <div class="content">
-            <h2>Hello {{ $name }},</h2>
-            <p>Welcome to <strong>{{ $companyName }}</strong> — your trusted loan and customer management platform.</p>
-            <p>Your account has been successfully created (or your credentials have been reset).</p>
+            <h2>🎉 Congratulations {{ $client_name }}!</h2>
+            <p>We’re thrilled to inform you that your loan of <strong>₵{{ $amount }}</strong> with <strong>{{ $companyName }}</strong> has been successfully completed and fully paid off.</p>
 
-            <p><strong>Login Details:</strong></p>
+            <p>This achievement reflects your commitment and trust in our services — we truly appreciate you!</p>
+
             <div class="credentials">
-                <p><strong>Email:</strong> {{ $email }}</p>
-                <p><strong>Password:</strong> {{ $password }}</p>
+                <p><strong>Loan ID:</strong> {{ $loan->id }}</p>
+                <p><strong>Status:</strong> Completed</p>
+                <p><strong>Completion Date:</strong> {{ $loan->updated_at->format('d M Y, h:i A') }}</p>
             </div>
 
-            <p>You can log in using the button below:</p>
+            <p>Thank you for choosing <strong>{{ $companyName }}</strong>. We look forward to supporting your next financial goal.</p>
+
             <p style="text-align:center;">
-                <a href="{{ $loginUrl }}" class="button">Login to Your Account</a>
+                <a href="{{ $loginUrl }}" class="button">View Your Account</a>
             </p>
 
             <p style="margin-top: 25px; font-size: 14px;">
-                <em>We recommend changing your password after your first login for security reasons.</em>
+                <em>Your financial journey continues — we’re always here for you!</em>
             </p>
 
-            <p>Thank you,<br>
+            <p>Warm regards,<br>
             <strong>The {{ $companyName }} Team</strong></p>
         </div>
 

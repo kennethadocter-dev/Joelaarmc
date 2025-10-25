@@ -6,6 +6,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 use App\Models\User;
+use App\Models\Setting;
 
 class AccountCreatedMail extends Mailable
 {
@@ -13,6 +14,7 @@ class AccountCreatedMail extends Mailable
 
     public $user;
     public $plainPassword;
+    public $settings;
 
     /**
      * Create a new message instance.
@@ -21,6 +23,7 @@ class AccountCreatedMail extends Mailable
     {
         $this->user = $user;
         $this->plainPassword = $plainPassword;
+        $this->settings = Setting::first(); // 🔄 Pull current company info
     }
 
     /**
@@ -28,13 +31,22 @@ class AccountCreatedMail extends Mailable
      */
     public function build()
     {
-        return $this->from(config('mail.from.address'), config('mail.from.name', 'Joelaar Micro-Credit'))
-            ->subject('Your Joelaar Micro-Credit Account Credentials')
-            ->view('emails.account_created')
+        $companyName = $this->settings->company_name ?? 'Joelaar Micro-Credit';
+        $companyEmail = $this->settings->email ?? config('mail.from.address');
+        $fromName = $this->settings->manager_name ?? $companyName;
+
+        return $this->from($companyEmail, $fromName)
+            ->subject("🎉 Welcome to {$companyName} — Your Account Details")
+            ->markdown('emails.account_created')
             ->with([
-                'user' => $this->user,
-                'plainPassword' => $this->plainPassword,
-                'loginUrl' => url('/login'),
+                'name'        => $this->user->name,
+                'email'       => $this->user->email,
+                'password'    => $this->plainPassword,
+                'loginUrl'    => url('/login'),
+                'companyName' => $companyName,
+                'companyEmail'=> $companyEmail,
+                'companyPhone'=> $this->settings->phone ?? '+233000000000',
+                'companyAddress' => $this->settings->address ?? 'Accra, Ghana',
             ]);
     }
 }

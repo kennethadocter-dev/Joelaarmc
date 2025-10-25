@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Your {{ $companyName }} Account Details</title>
+    <title>Your {{ $companyName }} Login Credentials</title>
     <style>
         body {
             font-family: "Segoe UI", Arial, sans-serif;
@@ -37,21 +37,12 @@
             font-size: 22px;
             margin-bottom: 15px;
         }
-        .content p {
-            line-height: 1.6;
-            margin: 10px 0;
-        }
         .credentials {
             background-color: #f3f4f6;
             border-left: 4px solid #2563eb;
             padding: 15px 20px;
             border-radius: 8px;
             margin: 20px 0;
-        }
-        .credentials p {
-            margin: 5px 0;
-            font-family: monospace;
-            font-size: 15px;
         }
         .button {
             display: inline-block;
@@ -74,20 +65,17 @@
 <body>
     <div class="container">
         <div class="header">
-            {{-- 👇 Make sure you have your logo in public/images/logo.png --}}
             <img src="{{ asset('images/logo.png') }}" alt="{{ $companyName }} Logo">
             <h1>{{ $companyName }}</h1>
         </div>
 
         <div class="content">
             <h2>Hello {{ $name }},</h2>
-            <p>Welcome to <strong>{{ $companyName }}</strong> — your trusted loan and customer management platform.</p>
-            <p>Your account has been successfully created (or your credentials have been reset).</p>
+            <p>Here are your <strong>{{ $companyName }}</strong> login credentials, re-sent as requested.</p>
 
-            <p><strong>Login Details:</strong></p>
             <div class="credentials">
                 <p><strong>Email:</strong> {{ $email }}</p>
-                <p><strong>Password:</strong> {{ $password }}</p>
+                <p><strong>New Password:</strong> {{ $password }}</p>
             </div>
 
             <p>You can log in using the button below:</p>
@@ -96,7 +84,7 @@
             </p>
 
             <p style="margin-top: 25px; font-size: 14px;">
-                <em>We recommend changing your password after your first login for security reasons.</em>
+                <em>For security reasons, we recommend changing your password after your next login.</em>
             </p>
 
             <p>Thank you,<br>

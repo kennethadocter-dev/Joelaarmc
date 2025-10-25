@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\User;
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Mail;
@@ -28,14 +29,14 @@ class CustomerController extends Controller
             : 'admin';
     }
 
-    /** 📋 List customers with optional search + status filter */
+    /** 📋 List customers */
     public function index(Request $request)
     {
         try {
             $q = trim((string)$request->get('q', ''));
             $status = $request->get('status', 'all');
 
-            // Auto-update customer status
+            // Auto-refresh customer status
             Customer::whereNot('status', 'suspended')->each(function ($customer) {
                 $hasUnpaidLoan = $customer->loans()
                     ->where(function ($q) {
@@ -99,7 +100,7 @@ class CustomerController extends Controller
         }
     }
 
-    /** 💾 Store new customer */
+    /** 💾 Store new customer + welcome email + SMS */
     public function store(Request $request)
     {
         try {
@@ -125,24 +126,9 @@ class CustomerController extends Controller
                 'full_name' => ['required', 'string', 'max:255'],
                 'phone'     => 'nullable|string|max:50',
                 'email'     => 'nullable|email|max:255',
-                'marital_status' => 'nullable|string|max:50',
-                'gender'         => 'nullable|string|max:10',
-                'house_no'       => 'nullable|string|max:100',
-                'community'      => 'nullable|string|max:255',
-                'location'       => 'nullable|string|max:255',
-                'district'       => 'nullable|string|max:255',
-                'postal_address' => 'nullable|string|max:255',
-                'workplace'      => 'nullable|string|max:255',
-                'profession'     => 'nullable|string|max:255',
-                'employer'       => 'nullable|string|max:255',
-                'bank'           => 'nullable|string|max:255',
-                'bank_branch'    => 'nullable|string|max:255',
-                'has_bank_loan'  => 'nullable|boolean',
-                'bank_monthly_deduction' => 'nullable|numeric',
-                'take_home'      => 'nullable|numeric',
-                'loan_amount_requested' => 'nullable|numeric',
-                'loan_purpose'   => 'nullable|string|max:255',
-                'status'         => 'nullable|in:active,inactive,suspended',
+                'community' => 'nullable|string|max:255',
+                'location'  => 'nullable|string|max:255',
+                'status'    => 'nullable|in:active,inactive,suspended',
                 'guarantors'               => 'nullable|array|max:5',
                 'guarantors.*.name'        => 'required|string|max:255',
                 'guarantors.*.occupation'  => 'nullable|string|max:255',
@@ -163,11 +149,11 @@ class CustomerController extends Controller
                 $customer->guarantors()->create($g);
             }
 
-            // 🔐 Linked user account
+            // 🔐 Create linked user + notify
             $plainPassword = Str::random(8);
-            try {
-                $loginEmail = $customer->email ?: (Str::slug($customer->full_name) . '@joelaar.local');
+            $loginEmail = $customer->email ?: (Str::slug($customer->full_name) . '@joelaar.local');
 
+            try {
                 $user = User::firstOrCreate(
                     ['email' => $loginEmail],
                     [
@@ -178,11 +164,13 @@ class CustomerController extends Controller
                     ]
                 );
 
+                // 📨 Email (Welcome + Login)
                 if (!empty($customer->email)) {
                     Mail::to($customer->email)->send(new CustomerWelcomeMail($customer));
                     Mail::to($customer->email)->send(new CustomerLoginMail($customer, $user->email, $plainPassword));
                 }
 
+                // 💬 SMS: send credentials
                 if (!empty($customer->phone)) {
                     $msg = "Welcome {$customer->full_name}! 🎉 Your Joelaar login is ready.
 Email: {$user->email}
@@ -201,7 +189,7 @@ Login: " . url('/login');
                     'customer_id' => $customer->id,
                     'client_name' => $customer->full_name,
                 ])
-                ->with('success', '✅ Customer created successfully!');
+                ->with('success', '✅ Customer created successfully and credentials sent.');
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to create customer.');
         }
@@ -257,6 +245,7 @@ Login: " . url('/login');
 
             $customer->update($validated);
 
+            // Update guarantors
             $incoming = collect($validated['guarantors'] ?? [])->map(fn($g) => [
                 'name'       => trim($g['name']),
                 'occupation' => $g['occupation'] ?? '',
@@ -283,7 +272,7 @@ Login: " . url('/login');
         }
     }
 
-    /** 🚫 Suspend manually — blocked if active loan exists */
+    /** 🚫 Suspend manually */
     public function suspend($id)
     {
         try {
@@ -333,7 +322,7 @@ Login: " . url('/login');
         }
     }
 
-    /** 🔍 Search for loan form autocomplete */
+    /** 🔍 Search for autocomplete */
     public function search(Request $request)
     {
         try {
@@ -354,10 +343,6 @@ Login: " . url('/login');
     private function handleError(\Throwable $e, string $message)
     {
         $user = auth()->user();
-        if ($user && strtolower($user->role ?? '') === 'superadmin') {
-            throw $e;
-        }
-
         Log::error('❌ CustomerController Error', [
             'user'  => $user?->email,
             'route' => request()->path(),

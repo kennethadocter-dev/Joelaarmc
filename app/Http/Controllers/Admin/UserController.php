@@ -27,9 +27,7 @@ class UserController extends Controller
         });
     }
 
-    /**
-     * 🔁 Helper: choose redirect route dynamically
-     */
+    /** 🔁 Dynamic redirect based on user role */
     private function redirectToIndex()
     {
         $user = auth()->user();
@@ -38,9 +36,7 @@ class UserController extends Controller
             : 'admin.users.index';
     }
 
-    /**
-     * 📋 List all users
-     */
+    /** 📋 List users */
     public function index(Request $request)
     {
         try {
@@ -90,9 +86,7 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * ➕ Show create user form
-     */
+    /** ➕ Show create form */
     public function create()
     {
         try {
@@ -102,9 +96,7 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * 💾 Store new user
-     */
+    /** 💾 Store new user + notify */
     public function store(Request $request)
     {
         try {
@@ -119,7 +111,7 @@ class UserController extends Controller
             $plainPassword = $validated['password'] ?? Str::random(8);
             $validated['password'] = bcrypt($plainPassword);
 
-            // ☎️ Normalize Ghana phone format
+            // ☎️ Normalize Ghana phone
             if (!empty($validated['phone'])) {
                 $phone = preg_replace('/\D/', '', $validated['phone']);
                 if (str_starts_with($phone, '0')) {
@@ -130,19 +122,20 @@ class UserController extends Controller
             }
 
             $user = User::create($validated);
+
             ActivityLogger::log('Created User', "User {$user->name} ({$user->role}) created by " . auth()->user()->name);
 
-            // 📩 Notify via Email & SMS
+            // 🔔 Notify via Email & SMS
             try {
                 if (!empty($user->email)) {
                     Mail::to($user->email)->send(new AccountCreatedMail($user, $plainPassword));
                 }
 
                 if (!empty($user->phone)) {
-                    $msg = "Hi {$user->name}, your Joelaar account has been created.\n"
-                        . "Login: " . url('/login') . "\n"
-                        . "Email: {$user->email}\n"
-                        . "Password: {$plainPassword}";
+                    $msg = "Hi {$user->name}, 🎉 your Joelaar account has been created!\n"
+                        . "📧 Email: {$user->email}\n"
+                        . "🔐 Password: {$plainPassword}\n"
+                        . "🌐 Login: " . url('/login');
                     SmsNotifier::send($user->phone, $msg);
                 }
             } catch (\Throwable $e) {
@@ -156,9 +149,7 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * ✏️ Edit user info
-     */
+    /** ✏️ Edit user info */
     public function edit(User $user)
     {
         try {
@@ -168,9 +159,7 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * 💾 Update user info + notify if password changed
-     */
+    /** 💾 Update user info + send new credentials if password changed */
     public function update(Request $request, User $user)
     {
         try {
@@ -186,7 +175,6 @@ class UserController extends Controller
                 'password' => 'nullable|string|min:6|confirmed',
             ]);
 
-            // Normalize phone
             if (!empty($validated['phone'])) {
                 $phone = preg_replace('/\D/', '', $validated['phone']);
                 if (str_starts_with($phone, '0')) {
@@ -205,42 +193,40 @@ class UserController extends Controller
             }
 
             $user->update($validated);
+
             ActivityLogger::log('Updated User', "User {$user->name} updated by " . auth()->user()->name);
 
-            // Send new credentials if password changed
-            try {
-                if ($newPassword) {
+            if ($newPassword) {
+                try {
                     if (!empty($user->email)) {
                         Mail::to($user->email)->send(new AccountCreatedMail($user, $newPassword));
                     }
 
                     if (!empty($user->phone)) {
                         $msg = "Hi {$user->name}, your Joelaar account password has been updated.\n"
-                            . "Email: {$user->email}\n"
-                            . "New Password: {$newPassword}\n"
-                            . "Login: " . url('/login');
+                            . "📧 Email: {$user->email}\n"
+                            . "🔐 New Password: {$newPassword}\n"
+                            . "🌐 Login: " . url('/login');
                         SmsNotifier::send($user->phone, $msg);
                     }
 
                     return redirect()->route($this->redirectToIndex())
                         ->with('success', '✅ User updated and new login credentials sent.');
-                } else {
+                } catch (\Throwable $e) {
+                    Log::error('❌ Failed to send password update message', ['error' => $e->getMessage()]);
                     return redirect()->route($this->redirectToIndex())
-                        ->with('success', '✅ User details updated successfully.');
+                        ->with('error', '⚠️ User updated but failed to send new password.');
                 }
-            } catch (\Throwable $e) {
-                Log::error('❌ Failed to send password update message', ['error' => $e->getMessage()]);
-                return redirect()->route($this->redirectToIndex())
-                    ->with('error', '⚠️ User updated but failed to send new password.');
             }
+
+            return redirect()->route($this->redirectToIndex())
+                ->with('success', '✅ User details updated successfully.');
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to update user details.');
         }
     }
 
-    /**
-     * 🗑️ Delete user safely
-     */
+    /** 🗑️ Delete user safely */
     public function destroy(User $user)
     {
         try {
@@ -258,9 +244,7 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * 🔁 Resend credentials (email + SMS)
-     */
+    /** 🔁 Re-send login credentials via Email & SMS */
     public function resendCredentials(User $user)
     {
         try {
@@ -270,17 +254,18 @@ class UserController extends Controller
 
             $newPassword = Str::random(10);
             $user->update(['password' => bcrypt($newPassword)]);
+
             ActivityLogger::log('Resent Credentials', "Credentials re-sent to {$user->name}");
 
             if (!empty($user->email)) {
-                Mail::to($user->email)->send(new AccountCreatedMail($user, $newPassword));
+                Mail::to($user->email)->send(new \App\Mail\CredentialsResentMail($user, $newPassword));
             }
 
             if (!empty($user->phone)) {
-                $msg = "Hi {$user->name}, here are your new Joelaar login details:\n"
-                    . "Email: {$user->email}\n"
-                    . "Password: {$newPassword}\n"
-                    . "Login: " . url('/login');
+                $msg = "Hi {$user->name}, 🔁 here are your new Joelaar login details:\n"
+                    . "📧 Email: {$user->email}\n"
+                    . "🔐 Password: {$newPassword}\n"
+                    . "🌐 Login: " . url('/login');
                 SmsNotifier::send($user->phone, $msg);
             }
 
@@ -290,16 +275,10 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * 🧰 Unified Safe Error Handler
-     */
+    /** 🧰 Error handler */
     private function handleError(\Throwable $e, string $message)
     {
         $user = auth()->user();
-        if ($user && strtolower($user->role ?? '') === 'superadmin') {
-            throw $e;
-        }
-
         Log::error('❌ UserController Error', [
             'user'  => $user?->email,
             'route' => request()->path(),

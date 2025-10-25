@@ -12,9 +12,11 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\LoanCompletedMail;
 use App\Helpers\ActivityLogger;
 use Illuminate\Support\Facades\Log;
-use App\Helpers\SmsNotifier; // ✅ added
+use App\Helpers\SmsNotifier;
 
 class LoanController extends Controller
 {
@@ -136,7 +138,7 @@ class LoanController extends Controller
         }
     }
 
-    /** 💾 Store Loan + Generate Schedule */
+    /** 💾 Store Loan + Generate Schedule + Send SMS */
     public function store(Request $request)
     {
         ini_set('max_execution_time', 45);
@@ -205,14 +207,12 @@ class LoanController extends Controller
             ]);
 
             for ($i = 1; $i <= $term; $i++) {
-                $installmentAmount = (float)$installments[$i];
-
                 LoanSchedule::create([
                     'loan_id'          => $loan->id,
                     'payment_number'   => $i,
-                    'amount'           => $installmentAmount,
+                    'amount'           => (float)$installments[$i],
                     'amount_paid'      => 0.00,
-                    'remaining_amount' => $installmentAmount,
+                    'remaining_amount' => (float)$installments[$i],
                     'is_paid'          => 0,
                     'due_date'         => Carbon::parse($validated['start_date'])->addMonths($i),
                     'note'             => 'Pending',
@@ -224,7 +224,7 @@ class LoanController extends Controller
             // 📨 SMS: Notify customer
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->client_name}, your loan of ₵" . number_format($loan->amount, 2) .
-                    " has been created successfully and is pending activation. Thank you for choosing Joelaar!";
+                    " has been created successfully and is pending approval. Thank you for choosing Joelaar!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
@@ -238,73 +238,7 @@ class LoanController extends Controller
         }
     }
 
-    /** 🔍 View loan details */
-    public function show(Loan $loan)
-    {
-        try {
-            $loan->load(['customer', 'user', 'payments.receivedByUser', 'loanSchedules']);
-            $payments = $loan->payments->sortByDesc('paid_at')->values();
-
-            foreach ($loan->loanSchedules as $schedule) {
-                if ($schedule->remaining_amount === null || $schedule->remaining_amount == 0) {
-                    $schedule->remaining_amount = max($schedule->amount - ($schedule->amount_paid ?? 0), 0);
-                    $schedule->save();
-                }
-            }
-
-            $schedules = $loan->loanSchedules
-                ->sortBy('payment_number')
-                ->map(function ($schedule) {
-                    return [
-                        'id'               => $schedule->id,
-                        'payment_number'   => $schedule->payment_number,
-                        'amount'           => (float)$schedule->amount,
-                        'amount_paid'      => (float)$schedule->amount_paid,
-                        'remaining_amount' => (float)$schedule->remaining_amount,
-                        'is_paid'          => (bool)$schedule->is_paid,
-                        'due_date'         => $schedule->due_date,
-                        'note'             => $schedule->note ?? 'Pending',
-                        'updated_at'       => $schedule->updated_at,
-                    ];
-                })
-                ->values();
-
-            $creator = $loan->user ? [
-                'id'         => $loan->user->id,
-                'name'       => $loan->user->name,
-                'email'      => $loan->user->email,
-                'created_at' => $loan->created_at->format('d M Y, h:i A'),
-            ] : null;
-
-            return Inertia::render('Admin/Loans/Show', [
-                'loan' => [
-                    'id'               => $loan->id,
-                    'client_name'      => $loan->client_name,
-                    'amount'           => $loan->amount,
-                    'interest_rate'    => $loan->interest_rate,
-                    'term_months'      => $loan->term_months,
-                    'start_date'       => $loan->start_date,
-                    'due_date'         => $loan->due_date,
-                    'amount_paid'      => $loan->amount_paid,
-                    'amount_remaining' => $loan->amount_remaining,
-                    'status'           => $loan->status,
-                    'customer'         => $loan->customer,
-                    'created_by'       => $creator,
-                    'loan_schedules'   => $schedules,
-                    'payments'         => $payments,
-                ],
-                'auth'  => ['user' => auth()->user()],
-                'flash' => [
-                    'success' => session('success'),
-                    'error'   => session('error'),
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load loan details.');
-        }
-    }
-
-    /** ✅ Activate loan */
+    /** ✅ Activate loan + Notify customer */
     public function activate(Loan $loan)
     {
         try {
@@ -323,10 +257,7 @@ class LoanController extends Controller
                 'disbursed_at' => now(),
             ]);
 
-            ActivityLogger::log(
-                'Activated Loan',
-                "Loan #{$loan->id} activated by {$me->name}"
-            );
+            ActivityLogger::log('Activated Loan', "Loan #{$loan->id} activated by {$me->name}");
 
             // 📨 SMS: Loan activation
             if (!empty($loan->customer?->phone)) {
@@ -342,7 +273,7 @@ class LoanController extends Controller
         }
     }
 
-    /** 💵 Record a loan payment (auto-refresh after observer) */
+    /** 💵 Record payment + Notify customer */
     public function recordPayment(Request $request, Loan $loan)
     {
         try {
@@ -378,36 +309,78 @@ class LoanController extends Controller
 
             // 📨 SMS: Payment recorded
             if (!empty($loan->customer?->phone)) {
-                $msg = "Hi {$loan->client_name}, payment of ₵" . number_format($payment->amount, 2) .
-                    " received for your loan. Thank you!";
+                $remainingAfter = max($loan->amount_remaining - $payment->amount, 0);
+                $msg = "Hi {$loan->client_name}, we've received your payment of ₵" . number_format($payment->amount, 2) .
+                    ". Remaining balance: ₵" . number_format($remainingAfter, 2) . ". Thank you!";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
-            // 🕒 Let observer update schedules
-            usleep(500000);
+            // 🕒 Check if fully paid → trigger completion logic
+            $totalPaid = DB::table('payments')->where('loan_id', $loan->id)->sum('amount');
+            if ($totalPaid >= $totalWithInterest - 0.01) {
+                $loan->update(['status' => 'paid', 'amount_remaining' => 0]);
+                ActivityLogger::log('Completed Loan', "Loan #{$loan->id} fully paid automatically.");
+
+                // ✅ Send Loan Completed Email + SMS
+                if (!empty($loan->customer?->email)) {
+                    Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
+                }
+                if (!empty($loan->customer?->phone)) {
+                    $msg = "🎉 Congratulations {$loan->client_name}! Your loan of ₵" . number_format($loan->amount, 2) .
+                        " is now fully paid off. Thank you for being a valued Joelaar customer!";
+                    SmsNotifier::send($loan->customer->phone, $msg);
+                }
+            }
 
             return Inertia::location(route($this->basePath() . '.loans.show', $loan->id));
         } catch (\Throwable $e) {
             DB::rollBack();
-            $msg = $e->getMessage();
-            if (stripos($msg, 'exceeds remaining') !== false) {
-                return back()->withInput()->with('error', "⚠️ {$msg}");
-            }
-
             return $this->handleError($e, '⚠️ Failed to record payment.');
         }
     }
 
-    /** 📊 Loans by month (for dashboard chart) */
+    /** 🎉 Mark loan as fully paid + Notify customer */
+    public function complete(Loan $loan)
+    {
+        try {
+            if ($loan->status === 'paid') {
+                return back()->with('info', 'Loan already marked as paid.');
+            }
+
+            $loan->update([
+                'status' => 'paid',
+                'amount_remaining' => 0,
+            ]);
+
+            ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked as fully paid by " . auth()->user()->name);
+
+            // ✅ Send Loan Completed Email + SMS
+            if (!empty($loan->customer?->email)) {
+                Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
+            }
+
+            if (!empty($loan->customer?->phone)) {
+                $msg = "🎉 Congratulations {$loan->client_name}! Your loan of ₵" . number_format($loan->amount, 2) .
+                    " is now fully paid off. Thank you for being a valued Joelaar customer!";
+                SmsNotifier::send($loan->customer->phone, $msg);
+            }
+
+            return back()->with('success', '✅ Loan marked as completed.');
+        } catch (\Throwable $e) {
+            return $this->handleError($e, '⚠️ Failed to complete loan.');
+        }
+    }
+
+    /** 📊 Loans by month */
     public function getLoansByYear(Request $request)
     {
         try {
             $year = $request->query('year', date('Y'));
             $rows = DB::table('loans')
-                ->select(DB::raw('strftime("%m", created_at) as month_key'), DB::raw('COUNT(*) as total_loans'))
+                ->select(DB::raw('EXTRACT(MONTH FROM created_at) as month_key'), DB::raw('COUNT(*) as total_loans'))
                 ->whereYear('created_at', $year)
-                ->groupBy(DB::raw('strftime("%m", created_at)'))
-                ->orderBy(DB::raw('strftime("%m", created_at)'))
+                ->groupBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
+                ->orderBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
                 ->pluck('total_loans', 'month_key');
 
             $result = [];
@@ -423,7 +396,7 @@ class LoanController extends Controller
         }
     }
 
-    /** 🧰 Unified safe-error handler */
+    /** 🧰 Unified error handler */
     private function handleError(\Throwable $e, string $message)
     {
         $user = auth()->user();
