@@ -1,63 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Welcome to Joelaar Micro-Credit</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f9fafb;
-      color: #333;
-      line-height: 1.6;
-      padding: 20px;
-    }
-    .container {
-      background-color: #ffffff;
-      border-radius: 8px;
-      padding: 24px;
-      max-width: 600px;
-      margin: 0 auto;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    }
-    h2 {
-      color: #1d4ed8;
-    }
-    a.button {
-      display: inline-block;
-      background-color: #2563eb;
-      color: #fff !important;
-      padding: 10px 18px;
-      text-decoration: none;
-      border-radius: 6px;
-      font-weight: bold;
-    }
-    p.footer {
-      font-size: 12px;
-      color: #666;
-      margin-top: 20px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Welcome to {{ $companyName }}</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background: #f9f9f9;
+            color: #333;
+            line-height: 1.6;
+            padding: 30px;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #f0f5ff;
+            padding: 20px;
+            text-align: center;
+        }
+        .header img {
+            max-height: 60px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 22px;
+            background: #0c6cf2;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            margin-top: 15px;
+        }
+        .footer {
+            background: #fafafa;
+            padding: 15px;
+            text-align: center;
+            font-size: 13px;
+            color: #777;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h2>Hello {{ $customer->full_name }},</h2>
+<div class="container">
+    <div class="header">
+        <img src="{{ $companyLogo }}" alt="{{ $companyName }} logo">
+    </div>
+    <div class="content">
+        <h2>👋 Welcome, {{ $customer->full_name }}!</h2>
+        <p>
+            We’re thrilled to have you join the <strong>{{ $companyName }}</strong> family.
+        </p>
+        <p>
+            You can now access your loan information, payment schedules, and updates right from your account.
+        </p>
 
-    <p>🎉 Welcome to <strong>Joelaar Micro-Credit</strong>!</p>
+        <a href="{{ url('/login') }}" class="button">Login to your account</a>
 
-    <p>We’re excited to let you know that your customer profile has been created successfully in our system.</p>
-
-    <p>Our team will contact you soon regarding your loan request or any next steps.</p>
-
-    <p>You can always reach out to us if you have any questions — we’re happy to assist!</p>
-
-    <p style="margin-top: 24px;">
-      <a href="{{ url('/login') }}" class="button">Visit Our Portal</a>
-    </p>
-
-    <p class="footer">
-      Thank you for choosing Joelaar Micro-Credit.<br>
-      <strong>— The Joelaar Team</strong>
-    </p>
-  </div>
+        <p style="margin-top: 20px;">Need help? Just reply to this email or reach us via the contact below.</p>
+    </div>
+    <div class="footer">
+        <p>{{ $companyName }}<br>
+        📞 {{ $companyPhone }} | 🌐 <a href="{{ $companyUrl }}">{{ $companyUrl }}</a></p>
+    </div>
+</div>
 </body>
 </html>

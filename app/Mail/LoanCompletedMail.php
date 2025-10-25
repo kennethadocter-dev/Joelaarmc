@@ -15,36 +15,35 @@ class LoanCompletedMail extends Mailable
     public $loan;
     public $settings;
 
-    /**
-     * Create a new message instance.
-     */
     public function __construct(Loan $loan)
     {
         $this->loan = $loan;
-        $this->settings = Setting::first(); // 👈 dynamically load company info
+        $this->settings = Setting::first();
     }
 
-    /**
-     * Build the message.
-     */
     public function build()
     {
         $companyName = $this->settings->company_name ?? 'Joelaar Micro-Credit';
-        $companyEmail = $this->settings->email ?? config('mail.from.address');
+        $companyEmail = $this->settings->company_email ?? config('mail.from.address');
+        $companyPhone = $this->settings->company_phone ?? '+233 24 609 6706';
+        $companyAddress = $this->settings->company_address ?? 'Accra, Ghana';
+        $companyUrl = $this->settings->company_website ?? url('/');
+        $companyLogo = $this->settings->company_logo_url ?? asset('images/logo.png');
         $fromName = $this->settings->manager_name ?? $companyName;
 
         return $this->from($companyEmail, $fromName)
             ->subject("🎉 Congratulations! Your Loan with {$companyName} is Fully Paid")
-            ->view('emails.loan_completed')
-            ->with([
-                'loan'            => $this->loan,
-                'client_name'     => $this->loan->client_name,
-                'amount'          => number_format($this->loan->amount, 2),
-                'companyName'     => $companyName,
-                'companyEmail'    => $companyEmail,
-                'companyPhone'    => $this->settings->phone ?? '+233000000000',
-                'companyAddress'  => $this->settings->address ?? 'Accra, Ghana',
-                'loginUrl'        => url('/login'),
+            ->view('emails.loan_completed', [
+                'loan' => $this->loan,
+                'client_name' => $this->loan->client_name,
+                'amount' => number_format($this->loan->amount, 2),
+                'companyName' => $companyName,
+                'companyEmail' => $companyEmail,
+                'companyPhone' => $companyPhone,
+                'companyAddress' => $companyAddress,
+                'companyUrl' => $companyUrl,
+                'companyLogo' => $companyLogo,
+                'loginUrl' => url('/login'),
             ]);
     }
 }
