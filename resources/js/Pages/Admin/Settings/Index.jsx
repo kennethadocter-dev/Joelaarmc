@@ -3,10 +3,20 @@ import { Head, useForm, usePage, router } from "@inertiajs/react";
 import { useEffect, useState } from "react";
 
 export default function SettingsIndex() {
-    const { settings, flash } = usePage().props;
+    const { settings, flash, auth } = usePage().props;
     const [showConfirm, setShowConfirm] = useState(false);
 
-    const { data, setData, post, processing, errors } = useForm({
+    // Detect role for correct route prefix
+    const isSuperadmin =
+        auth?.user?.is_super_admin || auth?.user?.role === "superadmin";
+    const updateRoute = isSuperadmin
+        ? route("superadmin.settings.update")
+        : route("admin.settings.update");
+    const resetRoute = isSuperadmin
+        ? route("superadmin.settings.reset")
+        : route("admin.settings.reset");
+
+    const { data, setData, processing, errors } = useForm({
         company_name: settings.company_name || "",
         address: settings.address || "",
         phone: settings.phone || "",
@@ -20,17 +30,26 @@ export default function SettingsIndex() {
         default_penalty_rate: settings.default_penalty_rate ?? 0.5,
         grace_period_days: settings.grace_period_days ?? 0,
         allow_early_repayment: !!settings.allow_early_repayment,
-        _method: "put",
     });
 
     const submit = (e) => {
         e.preventDefault();
-        post(route("settings.update"), { forceFormData: true });
+        router.put(updateRoute, data, {
+            onSuccess: () => {
+                alert("✅ Settings updated successfully!");
+            },
+            onError: (err) => {
+                console.error(err);
+                alert(
+                    "⚠️ Failed to update settings. Check console for details.",
+                );
+            },
+        });
     };
 
     const handleReset = () => {
         router.put(
-            route("settings.reset"),
+            resetRoute,
             {},
             {
                 onFinish: () => setShowConfirm(false),
@@ -175,7 +194,7 @@ export default function SettingsIndex() {
                 </form>
             </div>
 
-            {/* 🔒 Custom Confirmation Modal */}
+            {/* 🧱 Custom Confirmation Modal */}
             {showConfirm && (
                 <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
                     <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full space-y-4 text-center">
@@ -184,7 +203,8 @@ export default function SettingsIndex() {
                         </h3>
                         <p className="text-gray-600">
                             Are you sure you want to reset all settings to
-                            default values? <br />
+                            default values?
+                            <br />
                             <span className="text-sm text-gray-500">
                                 This action cannot be undone.
                             </span>
