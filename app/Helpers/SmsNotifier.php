@@ -22,19 +22,18 @@ class SmsNotifier
     public static function send(string $phone, string $message): bool
     {
         try {
-            // ✅ Support both key styles
-            $apiKey   = env('ARKESEL_SMS_API_KEY', env('ARKESEL_API_KEY'));
-            $senderId = env('ARKESEL_SMS_SENDER_ID', env('ARKESEL_SENDER_ID', 'Joelaar'));
-            $url      = env('ARKESEL_SMS_URL', 'https://sms.arkesel.com/api/v2/sms/send');
+            // 🔑 Use your provided credentials
+            $apiKey   = env('ARKESEL_SMS_API_KEY', 'c1RKRGttRUNCT2ZhTGtPZEZydmg');
+            $senderId = env('ARKESEL_SMS_SENDER_ID', 'Joelaar');
+            $url      = env('ARKESEL_SMS_URL', 'https://sms.arkesel.com/sms/api');
 
-            // 🧠 Validate credentials before sending
             if (empty($apiKey)) {
                 Log::error('❌ Arkesel SMS Error: Missing API key in .env');
                 self::queueSms($phone, $message, 'queued', 'missing_api_key');
                 return false;
             }
 
-            // 🧹 Normalize phone number (Ghana format default)
+            // 🧹 Normalize phone number (Ghana format)
             $phone = preg_replace('/\D/', '', $phone);
             if (str_starts_with($phone, '0')) {
                 $phone = '233' . substr($phone, 1);
@@ -42,52 +41,44 @@ class SmsNotifier
                 $phone = '233' . $phone;
             }
 
-            // ✉️ Prepare payload
-            $payload = [
-                'sender'     => $senderId,
-                'message'    => $message,
-                'recipients' => [$phone],
-            ];
+            // 📡 Build full GET URL
+            $query = http_build_query([
+                'action'   => 'send-sms',
+                'api_key'  => $apiKey,
+                'to'       => $phone,
+                'from'     => $senderId,
+                'sms'      => $message,
+            ]);
 
-            // 🚀 Send SMS via Arkesel (with timeout + JSON)
-            $response = Http::timeout(10)
-                ->withHeaders([
-                    'api-key' => $apiKey,
-                    'Accept'  => 'application/json',
-                ])
-                ->post($url, $payload);
+            $fullUrl = "{$url}?{$query}";
 
+            // 🚀 Send GET request
+            $response = Http::timeout(10)->get($fullUrl);
             $statusCode = $response->status();
-            $success = $response->successful();
-            $body = $response->json();
+            $body = $response->body();
 
-            // ✅ Determine result
-            $status = $success ? 'sent' : 'failed';
-            $error  = $success ? null : json_encode($body, JSON_PRETTY_PRINT);
+            // ✅ Success if status 200 and contains "OK" or "success"
+            $success = $response->successful() && str_contains(strtolower($body), 'success');
+            $status  = $success ? 'sent' : 'failed';
 
-            // 🧾 Save to database (sms_logs table)
-            self::logSms($phone, $message, $status, $error);
+            self::logSms($phone, $message, $status, $success ? null : $body);
 
-            // 🗂 Log to Laravel log
             if ($success) {
                 Log::info('✅ SMS sent via Arkesel', [
                     'phone'    => $phone,
                     'message'  => $message,
                     'response' => $body,
-                    'status'   => $statusCode,
                 ]);
                 return true;
             }
 
-            // ⚠️ If API failed, queue it for retry
-            Log::warning('⚠️ Arkesel SMS failed, queued for retry', [
+            Log::warning('⚠️ Arkesel SMS failed', [
                 'phone'   => $phone,
                 'message' => $message,
-                'status'  => $statusCode,
                 'body'    => $body,
+                'status'  => $statusCode,
             ]);
-            self::queueSms($phone, $message, 'queued', $error);
-
+            self::queueSms($phone, $message, 'queued', $body);
             return false;
         } catch (\Exception $e) {
             Log::error('❌ SMS sending error', ['error' => $e->getMessage()]);
@@ -95,7 +86,6 @@ class SmsNotifier
             return false;
         }
     }
-
     /**
      * 🧾 Save SMS attempt to database
      */
