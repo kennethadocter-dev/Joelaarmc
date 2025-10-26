@@ -36,7 +36,6 @@ export default function LoanShow() {
         basePath = "admin",
     } = usePage().props;
 
-    
     if (!initialLoan || Object.keys(initialLoan).length === 0) {
         return (
             <div className="text-center py-20 text-red-600 font-semibold">
@@ -193,10 +192,10 @@ export default function LoanShow() {
                                 loan.loan_schedules?.find(
                                     (s) =>
                                         !s.is_paid &&
-                                        Number(s.remaining_amount ?? 0) > 0,
+                                        Number(s.installment_balance ?? 0) > 0,
                                 ) || null;
                             const remainder = nextDue
-                                ? Number(nextDue.remaining_amount || 0)
+                                ? Number(nextDue.installment_balance || 0)
                                 : 0;
                             const disabled = remainder <= 0.009;
 
@@ -294,140 +293,6 @@ export default function LoanShow() {
                     </div>
                 )}
 
-                {/* 💳 Payment History */}
-                <div className="bg-white shadow rounded-lg p-6">
-                    <h3 className="font-semibold text-gray-800 mb-3">
-                        Payment History
-                    </h3>
-                    {loan.payments?.length ? (
-                        <table className="min-w-full text-sm border border-gray-100">
-                            <thead className="bg-gray-100">
-                                <tr>
-                                    {[
-                                        "Date",
-                                        "Amount",
-                                        "Method",
-                                        "Reference",
-                                        "Note",
-                                        "Received By",
-                                    ].map((col) => (
-                                        <th
-                                            key={col}
-                                            className="px-4 py-2 text-left font-semibold text-gray-700"
-                                        >
-                                            {col}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {[...(loan.payments || [])]
-                                    .sort(
-                                        (a, b) =>
-                                            new Date(b.paid_at) -
-                                            new Date(a.paid_at),
-                                    )
-                                    .map((p) => (
-                                        <tr
-                                            key={p.id}
-                                            className="hover:bg-gray-50"
-                                        >
-                                            <td className="px-4 py-2">
-                                                {longDate(p.paid_at)}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {money(p.amount)}
-                                            </td>
-                                            <td className="px-4 py-2 capitalize">
-                                                {p.payment_method || "—"}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {p.reference || "—"}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {p.note || "—"}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {p.receivedByUser?.name ||
-                                                    auth.user?.name ||
-                                                    "—"}
-                                            </td>
-                                        </tr>
-                                    ))}
-                            </tbody>
-                        </table>
-                    ) : (
-                        <p className="text-gray-600 italic">
-                            No payments recorded yet.
-                        </p>
-                    )}
-                </div>
-
-                {/* 🧾 Loan Summary */}
-                <div className="bg-white shadow rounded-lg p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <Info label="Client Name" value={loan.client_name} />
-                        <Info
-                            label="Created By"
-                            value={
-                                loan.created_by
-                                    ? `${loan.created_by.name} (${loan.created_by.email})`
-                                    : "—"
-                            }
-                        />
-                        <Info
-                            label="Status"
-                            value={
-                                <span
-                                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                        loan.status === "active"
-                                            ? "bg-blue-100 text-blue-700"
-                                            : loan.status === "paid"
-                                              ? "bg-green-100 text-green-700"
-                                              : loan.status === "overdue"
-                                                ? "bg-red-100 text-red-700"
-                                                : "bg-yellow-100 text-yellow-700"
-                                    }`}
-                                >
-                                    {loan.status?.toUpperCase()}
-                                </span>
-                            }
-                        />
-                        <Info label="Amount" value={money(loan.amount)} />
-                        <Info
-                            label="Interest Rate"
-                            value={`${loan.interest_rate}%`}
-                        />
-                        <Info
-                            label="Term"
-                            value={`${loan.term_months} month(s)`}
-                        />
-                        <Info
-                            label="Start Date"
-                            value={longDate(loan.start_date)}
-                        />
-                        <Info
-                            label="Due Date"
-                            value={longDate(loan.due_date)}
-                        />
-                        <Info
-                            label="Totals"
-                            value={
-                                <>
-                                    Paid:{" "}
-                                    <span className="text-green-600 font-semibold">
-                                        {money(loan.amount_paid)}
-                                    </span>{" "}
-                                    · Remaining:{" "}
-                                    <span className="text-red-600 font-semibold">
-                                        {money(loan.amount_remaining)}
-                                    </span>
-                                </>
-                            }
-                        />
-                    </div>
-                </div>
-
                 {/* 📅 Monthly Payment Schedule */}
                 <div className="bg-white shadow rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-800 mb-3">
@@ -462,16 +327,16 @@ export default function LoanShow() {
 
                                     if (
                                         s.is_paid ||
-                                        s.remaining_amount <= 0.009
+                                        s.installment_balance <= 0.009
                                     ) {
                                         label = "Cleared ✅";
                                         colorClass =
                                             "bg-green-100 text-green-700";
                                     } else if (
-                                        s.remaining_amount < s.amount &&
-                                        s.remaining_amount > 0.009
+                                        s.installment_balance < s.amount &&
+                                        s.installment_balance > 0.009
                                     ) {
-                                        label = `Partial — ₵${s.remaining_amount.toFixed(2)} left`;
+                                        label = `Partial — ₵${s.installment_balance.toFixed(2)} left`;
                                         colorClass =
                                             "bg-orange-100 text-orange-700";
                                     }
@@ -495,7 +360,7 @@ export default function LoanShow() {
                                                 {money(s.amount_paid)}
                                             </td>
                                             <td className="px-4 py-2 text-red-600 font-semibold">
-                                                {money(s.remaining_amount)}
+                                                {money(s.installment_balance)}
                                             </td>
                                             <td className="px-4 py-2">
                                                 {longDate(s.due_date)}

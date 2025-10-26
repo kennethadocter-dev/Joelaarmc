@@ -101,14 +101,14 @@ class PaymentController extends Controller
                 'note'           => $validated['note'] ?? null,
             ]);
 
-            /** 📅 Distribute across monthly schedule */
+            /** 📅 Distribute payment across monthly schedule */
             $remainingPayment = $validated['amount'];
             $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
 
             foreach ($schedules as $schedule) {
                 if ($remainingPayment <= 0) break;
 
-                $balance = $schedule->remaining_amount ?? ($schedule->amount - $schedule->amount_paid);
+                $balance = $schedule->installment_balance ?? ($schedule->amount - $schedule->amount_paid);
 
                 if ($balance > 0) {
                     if ($remainingPayment >= $balance) {
@@ -121,9 +121,9 @@ class PaymentController extends Controller
                         $remainingPayment = 0;
                     }
 
-                    // 🧮 Recalculate remaining & status
-                    $schedule->remaining_amount = max(0, $schedule->amount - $schedule->amount_paid);
-                    $schedule->is_paid = $schedule->remaining_amount <= 0.01;
+                    // 🧮 Recalculate balance & status
+                    $schedule->installment_balance = max(0, $schedule->amount - $schedule->amount_paid);
+                    $schedule->is_paid = $schedule->installment_balance <= 0.01;
                     $schedule->note = $schedule->is_paid
                         ? 'Fully paid'
                         : ($schedule->amount_paid > 0 ? 'Partially paid' : 'Pending');
@@ -135,7 +135,7 @@ class PaymentController extends Controller
             /** 📊 Recalculate totals in main loan */
             $loan->refresh();
             $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
-            $loan->amount_remaining = $loan->loanSchedules()->sum('remaining_amount');
+            $loan->amount_remaining = $loan->loanSchedules()->sum('installment_balance');
             $loan->interest_earned = max(0, $loan->amount_paid - $loan->amount);
             $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
             $loan->save();
@@ -192,7 +192,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 🧰 Error handler */
+    /** 🧰 Centralized error handler */
     private function handleError(\Throwable $e, string $message)
     {
         Log::error('❌ PaymentController Error', [
@@ -200,6 +200,8 @@ class PaymentController extends Controller
             'trace' => $e->getTraceAsString(),
         ]);
 
-        return redirect()->route($this->basePath() . '.loans.index')->with('error', $message);
+        return redirect()
+            ->route($this->basePath() . '.loans.index')
+            ->with('error', $message);
     }
 }
