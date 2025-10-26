@@ -440,7 +440,7 @@ export default function LoanShow() {
                                         "Payment",
                                         "Amount (₵)",
                                         "Amount Paid (₵)",
-                                        "Remainder (₵)",
+                                        "Amount Left (₵)",
                                         "Due Date",
                                         "Status",
                                     ].map((h) => (
