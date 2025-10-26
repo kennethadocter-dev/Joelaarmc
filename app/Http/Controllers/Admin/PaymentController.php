@@ -108,22 +108,19 @@ class PaymentController extends Controller
             foreach ($schedules as $schedule) {
                 if ($remainingPayment <= 0) break;
 
-                $balance = $schedule->installment_balance ?? ($schedule->amount - $schedule->amount_paid);
+                $balance = $schedule->amount_left ?? ($schedule->amount - $schedule->amount_paid);
 
                 if ($balance > 0) {
                     if ($remainingPayment >= $balance) {
-                        // Full payment for this schedule
                         $schedule->amount_paid += $balance;
                         $remainingPayment -= $balance;
                     } else {
-                        // Partial payment for this schedule
                         $schedule->amount_paid += $remainingPayment;
                         $remainingPayment = 0;
                     }
 
-                    // 🧮 Recalculate balance & status
-                    $schedule->installment_balance = max(0, $schedule->amount - $schedule->amount_paid);
-                    $schedule->is_paid = $schedule->installment_balance <= 0.01;
+                    $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
+                    $schedule->is_paid = $schedule->amount_left <= 0.01;
                     $schedule->note = $schedule->is_paid
                         ? 'Fully paid'
                         : ($schedule->amount_paid > 0 ? 'Partially paid' : 'Pending');
@@ -131,6 +128,10 @@ class PaymentController extends Controller
                     $schedule->save();
                 }
             }
+
+$loan->refresh();
+$loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
+$loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
 
             /** 📊 Recalculate totals in main loan */
             $loan->refresh();

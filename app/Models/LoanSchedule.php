@@ -16,7 +16,7 @@ class LoanSchedule extends Model
         'payment_number',
         'amount',
         'amount_paid',
-        'installment_balance', // renamed from remaining_amount
+        'amount_left', // ✅ renamed
         'due_date',
         'is_paid',
         'note',
@@ -25,7 +25,7 @@ class LoanSchedule extends Model
     protected $casts = [
         'amount' => 'decimal:2',
         'amount_paid' => 'decimal:2',
-        'installment_balance' => 'decimal:2',
+        'amount_left' => 'decimal:2', // ✅ renamed
         'due_date' => 'datetime:Y-m-d',
         'is_paid' => 'boolean',
     ];
@@ -37,32 +37,29 @@ class LoanSchedule extends Model
     }
 
     /**
-     * 🧮 Auto-update installment balance and payment status
-     * every time this schedule is updated.
+     * 🧮 Auto-update balance and status on every save
      */
     protected static function booted()
     {
         static::saving(function ($schedule) {
-            // Auto-calculate remaining balance for this schedule
-            $schedule->installment_balance = max(0, $schedule->amount - $schedule->amount_paid);
+            // Auto-update balance
+            $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
 
-            // Auto-mark as paid if fully settled
-            $schedule->is_paid = $schedule->installment_balance <= 0.01;
+            // Auto-mark as paid if settled
+            $schedule->is_paid = $schedule->amount_left <= 0.01;
 
-            // 🔁 Update the parent loan’s totals when any schedule changes
-            if ($schedule->isDirty(['amount_paid', 'installment_balance'])) {
+            // Update parent loan totals
+            if ($schedule->isDirty(['amount_paid', 'amount_left'])) {
                 $loan = $schedule->loan;
                 if ($loan) {
-                    // Recalculate totals from all schedules
                     $loan->amount_paid = DB::table('loan_schedules')
                         ->where('loan_id', $loan->id)
                         ->sum('amount_paid');
 
                     $loan->amount_remaining = DB::table('loan_schedules')
                         ->where('loan_id', $loan->id)
-                        ->sum('installment_balance');
+                        ->sum('amount_left');
 
-                    // Update loan status dynamically
                     if ($loan->amount_remaining <= 0.01) {
                         $loan->status = 'paid';
                     } elseif ($loan->amount_paid > 0) {
