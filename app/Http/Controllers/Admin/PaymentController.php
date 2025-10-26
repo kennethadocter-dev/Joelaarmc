@@ -88,9 +88,10 @@ class PaymentController extends Controller
             ]);
 
             $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
+
             DB::beginTransaction();
 
-            /** 💰 Record payment */
+            /** 💰 Record the payment */
             $payment = Payment::create([
                 'loan_id'        => $loan->id,
                 'received_by'    => auth()->id(),
@@ -101,7 +102,7 @@ class PaymentController extends Controller
                 'note'           => $validated['note'] ?? null,
             ]);
 
-            /** 📅 Distribute payment across monthly schedule */
+            /** 📅 Distribute payment across schedule */
             $remainingPayment = $validated['amount'];
             $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
 
@@ -121,31 +122,30 @@ class PaymentController extends Controller
 
                     $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
                     $schedule->is_paid = $schedule->amount_left <= 0.01;
-                    $schedule->note = $schedule->is_paid
-                        ? 'Fully paid'
-                        : ($schedule->amount_paid > 0 ? 'Partially paid' : 'Pending');
-
+                    $schedule->note = $schedule->is_paid ? 'Fully paid' : 'Partially paid';
                     $schedule->save();
                 }
             }
 
-            /** 🔁 Update totals */
-            $loan->refresh();
+            /** 🔁 Recalculate loan totals & status */
             $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
             $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
             $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
             $loan->save();
 
+            // Final recalculation (ensures consistency)
+            $loan->recalcStatusAndSave();
+
             DB::commit();
 
-            /** ✅ RELOAD RELATIONSHIPS FOR FRONTEND */
+            /** 🔄 Reload relationships for frontend */
             $loan->load([
                 'customer',
                 'payments' => fn($q) => $q->orderByDesc('paid_at'),
                 'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
             ]);
 
-            /** 📨 Send SMS + Email Notifications */
+            /** 📨 Notifications */
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->customer->full_name}, we've received your payment of ₵" .
                     number_format($validated['amount'], 2) .
@@ -159,22 +159,29 @@ class PaymentController extends Controller
                 if (!empty($loan->customer?->email)) {
                     Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
                 }
+
+                if (!empty($loan->customer?->phone)) {
+                    $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
+                        number_format($loan->amount, 2) .
+                        " is now fully paid. Thank you for being a valued customer!";
+                    SmsNotifier::send($loan->customer->phone, $msg);
+                }
             }
 
             ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for loan #{$loan->id}");
 
-            /** 🧭 Return updated page directly — no redirect */
-            return Inertia::render('Admin/Loans/Show', [
-                'loan' => $loan,
-                'auth' => ['user' => auth()->user()],
-                'flash' => [
-                    'success' => '✅ Payment recorded successfully and table updated.',
-                ],
-            ]);
+            /** 🧭 Redirect to loan details page with success message */
+            return redirect()
+                ->route($this->basePath() . '.loans.show', $loan->id)
+                ->with('success', '✅ Payment recorded successfully and schedule updated.');
 
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('❌ PaymentController Error', ['error' => $e->getMessage()]);
+            Log::error('❌ PaymentController Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return redirect()
                 ->route($this->basePath() . '.loans.index')
                 ->with('error', '⚠️ Failed to record payment.');

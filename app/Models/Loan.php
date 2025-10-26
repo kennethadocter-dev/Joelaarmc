@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class Loan extends Model
 {
@@ -37,19 +38,19 @@ class Loan extends Model
         'interest_earned'   => 'decimal:2',
     ];
 
-    /** 👤 The staff user who created the loan */
+    /** 👤 Staff member who created the loan */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
     }
 
-    /** 🧍‍♂️ Customer associated with this loan */
+    /** 🧍 Customer linked to the loan */
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class, 'customer_id');
     }
 
-    /** 💳 All payments linked to this loan */
+    /** 💳 All payments linked to the loan */
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class, 'loan_id')->orderBy('paid_at', 'desc');
@@ -61,28 +62,38 @@ class Loan extends Model
         return $this->hasMany(Guarantor::class, 'loan_id');
     }
 
-    /** 📅 All payment schedules linked to this loan */
+    /** 📅 All monthly payment schedules for this loan */
     public function loanSchedules(): HasMany
     {
-        return $this->hasMany(LoanSchedule::class, 'loan_id');
+        return $this->hasMany(LoanSchedule::class, 'loan_id')->orderBy('payment_number');
     }
 
     /**
-     * 🔁 Recalculate and update loan status based on payments & due date
+     * 🔁 Recalculate totals and update loan status.
+     * Can be safely called after any payment or schedule update.
      */
     public function recalcStatusAndSave(): void
     {
-        $this->amount_paid = (float) ($this->amount_paid ?? 0);
-        $this->amount_remaining = (float) ($this->amount_remaining ?? 0);
+        // Get sums directly from the database for accuracy
+        $totals = DB::table('loan_schedules')
+            ->selectRaw('SUM(amount_paid) as total_paid, SUM(amount_left) as total_left')
+            ->where('loan_id', $this->id)
+            ->first();
 
+        $this->amount_paid = (float) ($totals->total_paid ?? 0);
+        $this->amount_remaining = (float) ($totals->total_left ?? 0);
+
+        // Prevent negative remainder
         if ($this->amount_remaining < 0) {
             $this->amount_remaining = 0;
         }
 
-        if ($this->amount_remaining <= 0) {
+        // Update interest earned dynamically
+        $this->interest_earned = max(0, $this->amount_paid - $this->amount);
+
+        // Determine loan status
+        if ($this->amount_remaining <= 0.01) {
             $this->status = 'paid';
-            $this->amount_remaining = 0;
-            $this->interest_earned = max(0, $this->amount_paid - $this->amount);
         } else {
             $dueDate = $this->due_date
                 ? Carbon::parse($this->due_date)
@@ -93,7 +104,7 @@ class Loan extends Model
             if ($dueDate && now()->greaterThan($dueDate) && $this->status !== 'paid') {
                 $this->status = 'overdue';
             } elseif ($this->status === 'pending') {
-                // stays pending until manually activated
+                // stays pending until activated
             } else {
                 $this->status = 'active';
             }
@@ -114,7 +125,7 @@ class Loan extends Model
         }
     }
 
-    /** 💰 Total loan amount + interest */
+    /** 💰 Total amount due (principal + interest) */
     public function getTotalDueAttribute(): float
     {
         $amount = (float) ($this->amount ?? 0);
@@ -123,11 +134,11 @@ class Loan extends Model
         return $amount + ($amount * $interestRate / 100);
     }
 
-    /** 📆 Monthly installment amount */
+    /** 📆 Monthly installment value */
     public function getMonthlyInstallmentAttribute(): float
     {
         return $this->term_months > 0
-            ? $this->total_due / $this->term_months
+            ? round($this->total_due / $this->term_months, 2)
             : 0;
     }
 }
