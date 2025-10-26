@@ -173,8 +173,6 @@ class LoanController extends Controller
 
             $multiplier = $interestMultipliers[$term] ?? (1 + $rate / 100);
             $totalDue   = $amount * $multiplier;
-
-            // ✅ Calculate interest portion for dashboard and analytics
             $interestEarned = round($totalDue - $amount, 2);
 
             $round2 = fn($num) => round($num, 2);
@@ -207,7 +205,7 @@ class LoanController extends Controller
                 'due_date'         => $dueDate,
                 'amount_paid'      => 0.00,
                 'amount_remaining' => $totalDue,
-                'interest_earned'  => $interestEarned, // ✅ NEW: save total expected interest
+                'interest_earned'  => $interestEarned,
                 'notes'            => $validated['notes'] ?? null,
                 'status'           => 'pending',
             ]);
@@ -215,20 +213,20 @@ class LoanController extends Controller
             // 📅 Generate monthly schedule with synced remaining amounts
             for ($i = 1; $i <= $term; $i++) {
                 LoanSchedule::create([
-                    'loan_id'          => $loan->id,
-                    'payment_number'   => $i,
-                    'amount'           => (float)$installments[$i],
-                    'amount_paid'      => 0.00,
-                    'remaining_amount' => (float)$installments[$i],
-                    'is_paid'          => false,
-                    'due_date'         => Carbon::parse($validated['start_date'])->addMonths($i),
-                    'note'             => 'Pending',
+                    'loan_id'        => $loan->id,
+                    'payment_number' => $i,
+                    'amount'         => (float)$installments[$i],
+                    'amount_paid'    => 0.00,
+                    'amount_left'    => (float)$installments[$i],
+                    'is_paid'        => false,
+                    'due_date'       => Carbon::parse($validated['start_date'])->addMonths($i),
+                    'note'           => 'Pending',
                 ]);
             }
 
             // ✅ Sync master loan total after schedules are generated
             $loan->update([
-                'amount_remaining' => LoanSchedule::where('loan_id', $loan->id)->sum('remaining_amount'),
+                'amount_remaining' => LoanSchedule::where('loan_id', $loan->id)->sum('amount_left'),
             ]);
 
             ActivityLogger::log('Created Loan', "Loan #{$loan->id} created for {$loan->client_name}");
@@ -255,7 +253,8 @@ class LoanController extends Controller
             return $this->handleError($e, '⚠️ Loan creation failed.');
         }
     }
-        /** 👁️ Show single loan details */
+
+    /** 👁️ Show single loan details */
     public function show(Loan $loan)
     {
         try {
@@ -284,6 +283,7 @@ class LoanController extends Controller
             return $this->handleError($e, '⚠️ Failed to load loan details.');
         }
     }
+
     /** ✅ Activate loan + Notify customer */
     public function activate(Loan $loan)
     {
@@ -432,7 +432,7 @@ class LoanController extends Controller
                 ->pluck('total_loans', 'month_key');
 
             $result = [];
-            for ($m = 1; $m <= 12; $m++) {
+            for ($…12; $m++) {
                 $key = str_pad($m, 2, '0', STR_PAD_LEFT);
                 $result[$key] = (int)($rows[$key] ?? 0);
             }
