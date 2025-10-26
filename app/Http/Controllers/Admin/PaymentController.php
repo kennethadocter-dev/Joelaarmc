@@ -129,21 +129,23 @@ class PaymentController extends Controller
                 }
             }
 
+            /** 🔁 Update totals */
             $loan->refresh();
             $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
             $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
-
-            /** 📊 Recalculate totals in main loan */
-            $loan->refresh();
-            $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
-            $loan->amount_remaining = $loan->loanSchedules()->sum('installment_balance');
-            $loan->interest_earned = max(0, $loan->amount_paid - $loan->amount);
             $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
             $loan->save();
 
             DB::commit();
 
-            /** 📱 Notify customer */
+            /** ✅ RELOAD RELATIONSHIPS FOR FRONTEND */
+            $loan->load([
+                'customer',
+                'payments' => fn($q) => $q->orderByDesc('paid_at'),
+                'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
+            ]);
+
+            /** 📨 Send SMS + Email Notifications */
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->customer->full_name}, we've received your payment of ₵" .
                     number_format($validated['amount'], 2) .
@@ -152,35 +154,30 @@ class PaymentController extends Controller
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
-            /** 🎉 If fully paid */
             if ($loan->status === 'paid') {
                 ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked fully paid.");
-
                 if (!empty($loan->customer?->email)) {
                     Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
                 }
-
-                if (!empty($loan->customer?->phone)) {
-                    $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
-                        number_format($loan->amount, 2) .
-                        " is now fully paid. Thank you for being a valued Joelaar customer!";
-                    SmsNotifier::send($loan->customer->phone, $msg);
-                }
             }
-
-            $loan->refresh();
-            $loan->load(['payments' => fn($q) => $q->orderByDesc('paid_at'), 'loanSchedules']);
 
             ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for loan #{$loan->id}");
 
+            /** 🧭 Return updated page directly — no redirect */
             return Inertia::render('Admin/Loans/Show', [
                 'loan' => $loan,
                 'auth' => ['user' => auth()->user()],
-                'flash' => ['success' => '✅ Payment recorded successfully.'],
+                'flash' => [
+                    'success' => '✅ Payment recorded successfully and table updated.',
+                ],
             ]);
+
         } catch (\Throwable $e) {
             DB::rollBack();
-            return $this->handleError($e, '⚠️ Failed to record payment.');
+            Log::error('❌ PaymentController Error', ['error' => $e->getMessage()]);
+            return redirect()
+                ->route($this->basePath() . '.loans.index')
+                ->with('error', '⚠️ Failed to record payment.');
         }
     }
 
