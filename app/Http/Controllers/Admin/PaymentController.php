@@ -168,11 +168,16 @@ $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
                 }
             }
 
+            $loan->refresh();
+            $loan->load(['payments' => fn($q) => $q->orderByDesc('paid_at'), 'loanSchedules']);
+
             ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for loan #{$loan->id}");
 
-            return redirect()
-                ->route($this->basePath() . '.loans.show', $loan->id)
-                ->with('success', '✅ Payment recorded successfully and monthly schedule updated.');
+            return Inertia::render('Admin/Loans/Show', [
+                'loan' => $loan,
+                'auth' => ['user' => auth()->user()],
+                'flash' => ['success' => '✅ Payment recorded successfully.'],
+            ]);
         } catch (\Throwable $e) {
             DB::rollBack();
             return $this->handleError($e, '⚠️ Failed to record payment.');

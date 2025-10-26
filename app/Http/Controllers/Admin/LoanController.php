@@ -258,7 +258,7 @@ class LoanController extends Controller
     public function show(Loan $loan)
     {
         try {
-            $loan->load([
+            $loan->loadMissing([
                 'customer',
                 'user',
                 'payments' => fn($q) => $q->orderByDesc('paid_at'),
