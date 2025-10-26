@@ -419,20 +419,24 @@ class LoanController extends Controller
         }
     }
 
-    /** 📊 Loans by month */
+        /** 📊 Loans by month */
     public function getLoansByYear(Request $request)
     {
         try {
             $year = $request->query('year', date('Y'));
+
             $rows = DB::table('loans')
-                ->select(DB::raw('EXTRACT(MONTH FROM created_at) as month_key'), DB::raw('COUNT(*) as total_loans'))
+                ->select(
+                    DB::raw('EXTRACT(MONTH FROM created_at) as month_key'),
+                    DB::raw('COUNT(*) as total_loans')
+                )
                 ->whereYear('created_at', $year)
                 ->groupBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
                 ->orderBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
                 ->pluck('total_loans', 'month_key');
 
             $result = [];
-            for ($…12; $m++) {
+            for ($m = 1; $m <= 12; $m++) {
                 $key = str_pad($m, 2, '0', STR_PAD_LEFT);
                 $result[$key] = (int)($rows[$key] ?? 0);
             }
@@ -448,13 +452,15 @@ class LoanController extends Controller
     private function handleError(\Throwable $e, string $message)
     {
         $user = auth()->user();
+
         Log::error('❌ LoanController Error', [
             'user'  => $user?->email,
             'route' => request()->path(),
             'error' => $e->getMessage(),
         ]);
 
-        return redirect()->route($this->basePath() . '.loans.index')
+        return redirect()
+            ->route($this->basePath() . '.loans.index')
             ->with('error', $message);
     }
 }

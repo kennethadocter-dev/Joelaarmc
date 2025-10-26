@@ -192,10 +192,10 @@ export default function LoanShow() {
                                 loan.loan_schedules?.find(
                                     (s) =>
                                         !s.is_paid &&
-                                        Number(s.remaining_amount ?? 0) > 0,
+                                        Number(s.amount_left ?? 0) > 0,
                                 ) || null;
                             const remainder = nextDue
-                                ? Number(nextDue.remaining_amount || 0)
+                                ? Number(nextDue.amount_left || 0)
                                 : 0;
                             const disabled = remainder <= 0.009;
 
@@ -459,18 +459,15 @@ export default function LoanShow() {
                                     let colorClass =
                                         "bg-yellow-100 text-yellow-700";
 
-                                    if (
-                                        s.is_paid ||
-                                        s.remaining_amount <= 0.009
-                                    ) {
+                                    if (s.is_paid || s.amount_left <= 0.009) {
                                         label = "Cleared ✅";
                                         colorClass =
                                             "bg-green-100 text-green-700";
                                     } else if (
-                                        s.remaining_amount < s.amount &&
-                                        s.remaining_amount > 0.009
+                                        s.amount_left < s.amount &&
+                                        s.amount_left > 0.009
                                     ) {
-                                        label = `Partial — ₵${s.remaining_amount.toFixed(2)} left`;
+                                        label = `Partial — ₵${s.amount_left.toFixed(2)} left`;
                                         colorClass =
                                             "bg-orange-100 text-orange-700";
                                     }
@@ -494,7 +491,7 @@ export default function LoanShow() {
                                                 {money(s.amount_paid)}
                                             </td>
                                             <td className="px-4 py-2 text-red-600 font-semibold">
-                                                {money(s.remaining_amount)}
+                                                {money(s.amount_left)}
                                             </td>
                                             <td className="px-4 py-2">
                                                 {longDate(s.due_date)}
