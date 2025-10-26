@@ -129,9 +129,9 @@ class PaymentController extends Controller
                 }
             }
 
-$loan->refresh();
-$loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
-$loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
+            $loan->refresh();
+            $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
+            $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
 
             /** 📊 Recalculate totals in main loan */
             $loan->refresh();
