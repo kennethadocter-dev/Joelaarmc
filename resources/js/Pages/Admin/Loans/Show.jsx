@@ -76,7 +76,8 @@ export default function LoanShow() {
             onSuccess: () => {
                 reset();
                 setOpen(false);
-                router.reload({ only: ["loan"] });
+                router.reload({ only: ["loan", "flash"] });
+                setTimeout(() => window.location.reload(), 1000);
             },
         });
     };
@@ -251,11 +252,6 @@ export default function LoanShow() {
                                                     ? "bg-gray-400 cursor-not-allowed"
                                                     : "bg-green-600 hover:bg-green-700"
                                             }`}
-                                            title={
-                                                disabled
-                                                    ? "Nothing due in the current installment."
-                                                    : undefined
-                                            }
                                         >
                                             Pay {money(remainder)}
                                         </button>
@@ -277,11 +273,6 @@ export default function LoanShow() {
                                                     ? "bg-gray-400 cursor-not-allowed"
                                                     : "bg-blue-600 hover:bg-blue-700"
                                             }`}
-                                            title={
-                                                disabled
-                                                    ? "Nothing due in the current installment."
-                                                    : undefined
-                                            }
                                         >
                                             💵 Record Cash Payment (
                                             {money(remainder)})
@@ -467,7 +458,9 @@ export default function LoanShow() {
                                         s.amount_left < s.amount &&
                                         s.amount_left > 0.009
                                     ) {
-                                        label = `Partial — ₵${s.amount_left.toFixed(2)} left`;
+                                        label = `Partial — ₵${s.amount_left.toFixed(
+                                            2,
+                                        )} left`;
                                         colorClass =
                                             "bg-orange-100 text-orange-700";
                                     }
