@@ -91,7 +91,7 @@ class PaymentController extends Controller
 
             DB::beginTransaction();
 
-            /** 💰 Record the payment */
+            /** 💰 Create the payment record */
             $payment = Payment::create([
                 'loan_id'        => $loan->id,
                 'received_by'    => auth()->id(),
@@ -102,50 +102,52 @@ class PaymentController extends Controller
                 'note'           => $validated['note'] ?? null,
             ]);
 
-            /** 📅 Distribute payment across schedule */
+            /** 📅 Distribute payment across unpaid schedules */
             $remainingPayment = $validated['amount'];
             $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
 
             foreach ($schedules as $schedule) {
-                if ($remainingPayment <= 0) break;
+                if ($remainingPayment <= 0) continue;
 
-                $balance = $schedule->amount_left ?? ($schedule->amount - $schedule->amount_paid);
+                $balance = (float)($schedule->amount_left ?? ($schedule->amount - $schedule->amount_paid));
 
-                if ($balance > 0) {
-                    if ($remainingPayment >= $balance) {
-                        $schedule->amount_paid += $balance;
-                        $remainingPayment -= $balance;
-                    } else {
-                        $schedule->amount_paid += $remainingPayment;
-                        $remainingPayment = 0;
-                    }
+                if ($balance <= 0) continue; // already fully paid
 
-                    $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
-                    $schedule->is_paid = $schedule->amount_left <= 0.01;
-                    $schedule->note = $schedule->is_paid ? 'Fully paid' : 'Partially paid';
-                    $schedule->save();
+                if ($remainingPayment >= $balance) {
+                    // Fully pay this schedule
+                    $schedule->amount_paid += $balance;
+                    $remainingPayment -= $balance;
+                } else {
+                    // Partial payment for this schedule
+                    $schedule->amount_paid += $remainingPayment;
+                    $remainingPayment = 0;
                 }
+
+                $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
+                $schedule->is_paid = $schedule->amount_left <= 0.01;
+                $schedule->note = $schedule->is_paid
+                    ? 'Fully paid'
+                    : ($schedule->amount_paid > 0 ? 'Partially paid' : 'Pending');
+                $schedule->save();
             }
 
-            /** 🔁 Recalculate loan totals & status */
+            /** 🔁 Recalculate and sync loan totals */
             $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
             $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
             $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
             $loan->save();
-
-            // Final recalculation (ensures consistency)
             $loan->recalcStatusAndSave();
 
             DB::commit();
 
-            /** 🔄 Reload relationships for frontend */
+            /** 🔄 Reload relationships for frontend view */
             $loan->load([
                 'customer',
                 'payments' => fn($q) => $q->orderByDesc('paid_at'),
                 'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
             ]);
 
-            /** 📨 Notifications */
+            /** 📨 Notify customer */
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->customer->full_name}, we've received your payment of ₵" .
                     number_format($validated['amount'], 2) .
@@ -154,8 +156,10 @@ class PaymentController extends Controller
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
+            /** 🎉 If loan is fully paid */
             if ($loan->status === 'paid') {
                 ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked fully paid.");
+
                 if (!empty($loan->customer?->email)) {
                     Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
                 }
@@ -163,14 +167,14 @@ class PaymentController extends Controller
                 if (!empty($loan->customer?->phone)) {
                     $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
                         number_format($loan->amount, 2) .
-                        " is now fully paid. Thank you for being a valued customer!";
+                        " is now fully paid. Thank you for being a valued Joelaar customer!";
                     SmsNotifier::send($loan->customer->phone, $msg);
                 }
             }
 
             ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for loan #{$loan->id}");
 
-            /** 🧭 Redirect to loan details page with success message */
+            /** ✅ Redirect with success */
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
                 ->with('success', '✅ Payment recorded successfully and schedule updated.');
@@ -202,7 +206,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 🧰 Centralized error handler */
+    /** 🧰 Error handler */
     private function handleError(\Throwable $e, string $message)
     {
         Log::error('❌ PaymentController Error', [
