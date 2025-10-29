@@ -1,136 +1,161 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, Link, usePage, useForm, router } from "@inertiajs/react";
+import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useState, useEffect } from "react";
-
-/* -------------------- 📊 Helpers -------------------- */
-const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
-const longDate = (iso) =>
-    iso
-        ? new Date(iso).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-          })
-        : "—";
-
-/* 🌈 Add fade animation styles globally */
-const style = document.createElement("style");
-style.textContent = `
-@keyframes fadeInOut {
-  0% { opacity: 0; transform: translateY(-10px); }
-  10%, 80% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-10px); }
-}
-.animate-fade-in-out {
-  animation: fadeInOut 3s ease-in-out forwards;
-}
-`;
-document.head.appendChild(style);
+import { toast, Toaster } from "react-hot-toast";
 
 export default function LoanShow() {
     const {
-        loan: initialLoan = {},
+        loan = {},
+        loanSchedules = [],
         auth = {},
-        flash = {},
-        csrf_token,
         basePath = "admin",
+        flash = {},
     } = usePage().props;
 
-    if (!initialLoan || Object.keys(initialLoan).length === 0) {
-        return (
-            <div className="text-center py-20 text-red-600 font-semibold">
-                ⚠️ Loan not found or data not loaded.
-            </div>
-        );
-    }
+    const user = auth?.user || {};
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [amount, setAmount] = useState("");
+    const [note, setNote] = useState("");
 
-    const [loan, setLoan] = useState(initialLoan);
-    const [open, setOpen] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
+    useEffect(() => {
+        if (flash?.success) toast.success(flash.success);
+        if (flash?.error) toast.error(flash.error);
+    }, [flash]);
 
-    const canRecordPayment = ["admin", "staff", "superadmin"].includes(
-        auth?.user?.role,
-    );
+    const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
+    const formatDate = (d) =>
+        d
+            ? new Date(d).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+              })
+            : "—";
 
-    /* -------------------- 💳 Record Payment -------------------- */
-    const { data, setData, post, processing, errors, reset } = useForm({
-        amount: "",
-        paid_at: new Date().toISOString().split("T")[0],
-        reference: "",
-        note: "",
-    });
+    const badge = (status) => {
+        switch (status) {
+            case "active":
+                return "bg-blue-100 text-blue-700";
+            case "paid":
+                return "bg-green-100 text-green-700";
+            case "pending":
+                return "bg-yellow-100 text-yellow-700";
+            case "overdue":
+                return "bg-red-100 text-red-700";
+            default:
+                return "bg-gray-100 text-gray-700";
+        }
+    };
 
+    /** 💵 Record Cash Payment */
     const submitPayment = (e) => {
         e.preventDefault();
-        const payment = parseFloat(data.amount);
-        const remaining = parseFloat(loan.amount_remaining || 0);
-
-        if (payment > remaining) {
-            alert(`⚠️ Payment exceeds remaining balance (${money(remaining)})`);
+        if (!amount || isNaN(amount) || Number(amount) <= 0) {
+            toast.error("Please enter a valid payment amount.");
             return;
         }
 
-        post(route(`${basePath}.loans.payment`, loan.id), {
-            data,
-            preserveScroll: true,
-            onSuccess: () => {
-                reset();
-                setOpen(false);
-                router.reload({ only: ["loan", "flash"] });
-                setTimeout(() => window.location.reload(), 1000);
+        router.post(
+            route(`${basePath}.payments.store`),
+            {
+                loan_id: loan.id,
+                amount,
+                received_by: user.name,
+                note,
             },
-        });
+            {
+                onStart: () => toast.loading("💾 Recording payment..."),
+                onFinish: () => toast.dismiss(),
+                onSuccess: () => {
+                    toast.success("✅ Cash payment recorded successfully!");
+                    setShowPaymentModal(false);
+                    setAmount("");
+                    setNote("");
+                    router.reload({
+                        only: ["loan", "loanSchedules", "auth"],
+                        preserveScroll: true,
+                        onFinish: () => {
+                            setTimeout(() => {
+                                document
+                                    .getElementById("payment-schedule")
+                                    ?.scrollIntoView({ behavior: "smooth" });
+                            }, 700);
+                        },
+                    });
+                },
+            },
+        );
     };
 
-    /* 🕒 Hide flash after a few seconds */
-    useEffect(() => {
-        if (flash?.success || flash?.error) {
-            const timer = setTimeout(() => {
-                window.history.replaceState(null, "", window.location.pathname);
-            }, 3500);
-            return () => clearTimeout(timer);
+    /** 💳 Pay with Paystack (only next unpaid schedule) */
+    const handlePaystackPayment = async () => {
+        // 🧮 Find next unpaid schedule
+        const nextSchedule = loanSchedules.find((s) => !s.is_paid);
+        const scheduleAmount = nextSchedule
+            ? nextSchedule.amount_left || nextSchedule.amount
+            : 0;
+
+        // 🧩 Guards
+        if (!nextSchedule) {
+            toast.error("All installments are already paid!");
+            return;
         }
-    }, [flash]);
+        if (!scheduleAmount || scheduleAmount <= 0) {
+            toast.error("No unpaid installment amount found!");
+            return;
+        }
 
-    /* -------------------- 🔓 Activate / Delete -------------------- */
-    const { delete: destroy } = useForm({});
+        toast.loading(
+            `🔗 Initializing Paystack for ₵${Number(scheduleAmount).toFixed(2)}...`,
+        );
 
-    const handleActivate = () => {
-        setConfirmAction({
-            title: "Activate Loan",
-            message:
-                "Are you sure you want to activate this loan? Once activated, it becomes live and visible to the customer.",
-            confirmLabel: "Activate",
-            confirmTheme: "green",
-            onConfirm: () => {
-                post(route(`${basePath}.loans.activate`, loan.id), {
-                    preserveScroll: true,
-                    onSuccess: () => {
-                        router.reload({ only: ["loan"] });
-                        setTimeout(() => window.location.reload(), 800);
+        try {
+            const response = await fetch(
+                route(`${basePath}.paystack.initialize`),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "X-CSRF-TOKEN": document
+                            .querySelector('meta[name="csrf-token"]')
+                            ?.getAttribute("content"),
                     },
-                });
-            },
-        });
+                    body: JSON.stringify({
+                        email: loan.customer?.email || "noemail@example.com",
+                        amount: scheduleAmount, // ✅ only next unpaid schedule
+                        loan_id: loan.id,
+                        method: "paystack",
+                    }),
+                },
+            );
+
+            const data = await response.json();
+            toast.dismiss();
+
+            if (data?.data?.authorization_url) {
+                toast.success("✅ Redirecting to Paystack...");
+                window.location.href = data.data.authorization_url;
+            } else if (data?.redirect_url) {
+                toast.success("✅ Redirecting to Paystack...");
+                window.location.href = data.redirect_url;
+            } else {
+                toast.error("⚠️ Failed to initialize Paystack payment.");
+                console.error("Paystack response:", data);
+            }
+        } catch (err) {
+            toast.dismiss();
+            toast.error("❌ Connection error. Please try again.");
+            console.error(err);
+        }
     };
 
-    const handleDelete = () => {
-        setConfirmAction({
-            title: "Delete Loan",
-            message:
-                "Do you really want to delete this loan? This action cannot be undone.",
-            confirmLabel: "Delete",
-            confirmTheme: "red",
-            onConfirm: () => {
-                destroy(route(`${basePath}.loans.deactivate`, loan.id), {
-                    onSuccess: () =>
-                        router.visit(route(`${basePath}.loans.index`)),
-                });
-            },
-        });
-    };
+    const actualPayments = [...(loan.payments || [])].sort(
+        (a, b) => b.id - a.id,
+    );
 
-    /* -------------------- Render -------------------- */
+    const isFullyPaid = loan.amount_remaining <= 0;
+
     return (
         <AuthenticatedLayout
             header={
@@ -140,519 +165,363 @@ export default function LoanShow() {
             }
         >
             <Head title={`Loan #${loan.id}`} />
+            <Toaster position="top-right" />
 
-            {/* 🌈 Floating Toasts */}
-            {flash?.success && (
-                <div className="fixed top-5 right-5 z-50 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg animate-fade-in-out">
-                    {flash.success}
-                </div>
-            )}
-            {flash?.error && (
-                <div className="fixed top-5 right-5 z-50 bg-red-600 text-white px-5 py-3 rounded-lg shadow-lg animate-fade-in-out">
-                    {flash.error}
-                </div>
-            )}
-
-            <div className="py-8 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                {/* 🔙 Navigation + Actions */}
+            <div className="py-8 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
                 <div className="flex justify-between items-center">
                     <Link
                         href={route(`${basePath}.loans.index`)}
-                        className="text-gray-600 hover:underline"
+                        className="px-4 py-2 bg-gray-800 text-white rounded-md font-semibold hover:bg-black transition"
                     >
                         ← Back to Loans
                     </Link>
-
-                    {loan.status === "pending" && (
-                        <div className="flex gap-3">
-                            <button
-                                onClick={handleActivate}
-                                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                            >
-                                ✅ Activate
-                            </button>
-                            <button
-                                onClick={handleDelete}
-                                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                            >
-                                ❌ Delete
-                            </button>
-                        </div>
-                    )}
                 </div>
 
-                {/* 💵 Payment Section */}
-                {loan.status === "active" && (
-                    <div className="bg-white shadow rounded-lg p-6">
-                        <h3 className="font-semibold text-gray-800 mb-3">
-                            Make a Payment
+                {/* Summary */}
+                <div className="bg-white rounded-xl shadow border border-gray-200 p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div className="space-y-2">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                            Client Info
                         </h3>
+                        <p>
+                            <strong>Name:</strong> {loan.client_name}
+                        </p>
+                        <p>
+                            <strong>Loan ID:</strong> #{loan.id}
+                        </p>
+                        <p>
+                            <strong>Created By:</strong>{" "}
+                            {loan.user?.name || "—"}
+                        </p>
+                    </div>
 
-                        {(() => {
-                            const nextDue =
-                                loan.loan_schedules?.find(
-                                    (s) =>
-                                        !s.is_paid &&
-                                        Number(s.amount_left ?? 0) > 0,
-                                ) || null;
-                            const remainder = nextDue
-                                ? Number(nextDue.amount_left || 0)
-                                : 0;
-                            const disabled = remainder <= 0.009;
+                    <div className="space-y-2">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                            Loan Details
+                        </h3>
+                        <p>
+                            <strong>Amount:</strong> {money(loan.amount)}
+                        </p>
+                        <p>
+                            <strong>Interest:</strong> {loan.interest_rate}%
+                        </p>
+                        <p>
+                            <strong>Term:</strong> {loan.term_months} months
+                        </p>
+                        <p>
+                            <strong>Start:</strong>{" "}
+                            {formatDate(loan.start_date)}
+                        </p>
+                        <p>
+                            <strong>Due:</strong> {formatDate(loan.due_date)}
+                        </p>
+                    </div>
 
-                            return (
-                                <div className="flex flex-wrap gap-4 items-center">
-                                    {/* 💳 CARD / PAYSTACK PAYMENT */}
-                                    <form
-                                        method="POST"
-                                        action={route(
-                                            `${basePath}.paystack.initialize`,
-                                        )}
-                                        className="flex items-center gap-3"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="_token"
-                                            value={csrf_token}
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="email"
-                                            value={
-                                                loan.customer?.email ||
-                                                "test@example.com"
-                                            }
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="loan_id"
-                                            value={loan.id}
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="amount"
-                                            value={remainder}
-                                        />
-                                        <select
-                                            name="method"
-                                            className="border rounded p-2 bg-white text-gray-800"
-                                        >
-                                            <option value="card">
-                                                💳 Card
-                                            </option>
-                                            <option value="mobile_money">
-                                                📱 Mobile Money
-                                            </option>
-                                        </select>
-                                        <button
-                                            type="submit"
-                                            disabled={disabled}
-                                            className={`px-4 py-2 rounded text-white ${
-                                                disabled
-                                                    ? "bg-gray-400 cursor-not-allowed"
-                                                    : "bg-green-600 hover:bg-green-700"
-                                            }`}
-                                        >
-                                            Pay {money(remainder)}
-                                        </button>
-                                    </form>
+                    <div className="space-y-2">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                            Balance Summary
+                        </h3>
+                        <p>
+                            <strong>Status:</strong>{" "}
+                            <span
+                                className={`px-3 py-1 rounded-full text-sm font-semibold ${badge(loan.status)}`}
+                            >
+                                {loan.status}
+                            </span>
+                        </p>
+                        <p>
+                            <strong>Paid:</strong>{" "}
+                            {money(loan.amount_paid ?? 0)}
+                        </p>
+                        <p>
+                            <strong>Remaining:</strong>{" "}
+                            <span className="text-red-600 font-semibold">
+                                {money(loan.amount_remaining ?? 0)}
+                            </span>
+                        </p>
+                    </div>
+                </div>
 
-                                    {/* 💵 CASH PAYMENT */}
-                                    {canRecordPayment && (
-                                        <button
-                                            onClick={() => {
-                                                setData(
-                                                    "amount",
-                                                    remainder.toFixed(2),
-                                                );
-                                                setOpen(true);
-                                            }}
-                                            disabled={disabled}
-                                            className={`px-4 py-2 rounded text-white ${
-                                                disabled
-                                                    ? "bg-gray-400 cursor-not-allowed"
-                                                    : "bg-blue-600 hover:bg-blue-700"
-                                            }`}
-                                        >
-                                            💵 Record Cash Payment (
-                                            {money(remainder)})
-                                        </button>
-                                    )}
-                                </div>
-                            );
-                        })()}
+                {isFullyPaid && (
+                    <div className="bg-green-50 border border-green-300 text-green-700 p-4 rounded-lg font-semibold">
+                        🎉 This loan is fully paid.
                     </div>
                 )}
 
-                {/* 💳 Payment History */}
-                <div className="bg-white shadow rounded-lg p-6">
-                    <h3 className="font-semibold text-gray-800 mb-3">
+                {/* Buttons */}
+                <div className="flex flex-wrap gap-3">
+                    <button
+                        onClick={() => setShowPaymentModal(true)}
+                        disabled={isFullyPaid}
+                        className={`px-5 py-2 rounded-md font-semibold transition ${
+                            isFullyPaid
+                                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                : "bg-green-600 text-white hover:bg-green-700"
+                        }`}
+                    >
+                        💵 Record Cash Payment
+                    </button>
+
+                    <button
+                        onClick={handlePaystackPayment}
+                        disabled={isFullyPaid}
+                        className={`px-5 py-2 rounded-md font-semibold transition ${
+                            isFullyPaid
+                                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                : "bg-indigo-600 text-white hover:bg-indigo-700"
+                        }`}
+                    >
+                        💳 Pay with Paystack
+                    </button>
+                </div>
+
+                {/* Payment Schedule Table */}
+                <div
+                    id="payment-schedule"
+                    className="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto"
+                >
+                    <h3 className="text-lg font-semibold text-gray-800 px-6 py-3 border-b">
+                        Payment Schedule
+                    </h3>
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-100">
+                            <tr>
+                                {[
+                                    "#",
+                                    "Month",
+                                    "Due Date",
+                                    "Expected Amount",
+                                    "Paid This Month",
+                                    "Remaining Balance",
+                                    "Status",
+                                ].map((h) => (
+                                    <th
+                                        key={h}
+                                        className="px-4 py-3 text-left text-sm font-semibold text-gray-800"
+                                    >
+                                        {h}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {loanSchedules.length ? (
+                                loanSchedules.map((s, i) => (
+                                    <tr
+                                        key={s.id || i}
+                                        className="hover:bg-gray-50 transition"
+                                    >
+                                        <td className="px-4 py-3 text-sm text-gray-700">
+                                            {i + 1}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-700">
+                                            Month {s.payment_number}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-700">
+                                            {formatDate(s.due_date)}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-700">
+                                            {money(s.amount)}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-green-700 font-semibold">
+                                            {money(s.amount_paid || 0)}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-red-600 font-semibold">
+                                            {money(s.amount_left || 0)}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm">
+                                            <span
+                                                className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                                    s.is_paid
+                                                        ? "bg-green-100 text-green-700"
+                                                        : s.amount_paid > 0
+                                                          ? "bg-yellow-100 text-yellow-700"
+                                                          : "bg-gray-100 text-gray-700"
+                                                }`}
+                                            >
+                                                {s.is_paid
+                                                    ? "Paid"
+                                                    : s.amount_paid > 0
+                                                      ? "Partial"
+                                                      : "Pending"}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr>
+                                    <td
+                                        colSpan="7"
+                                        className="text-center py-6 text-gray-600"
+                                    >
+                                        No payment schedule available.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Payment History Table */}
+                <div
+                    id="payment-history"
+                    className="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto"
+                >
+                    <h3 className="text-lg font-semibold text-gray-800 px-6 py-3 border-b">
                         Payment History
                     </h3>
-                    {loan.payments?.length ? (
-                        <table className="min-w-full text-sm border border-gray-100">
-                            <thead className="bg-gray-100">
-                                <tr>
-                                    {[
-                                        "Date",
-                                        "Amount",
-                                        "Method",
-                                        "Reference",
-                                        "Note",
-                                        "Received By",
-                                    ].map((col) => (
-                                        <th
-                                            key={col}
-                                            className="px-4 py-2 text-left font-semibold text-gray-700"
-                                        >
-                                            {col}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {[...(loan.payments || [])]
-                                    .sort(
-                                        (a, b) =>
-                                            new Date(b.paid_at) -
-                                            new Date(a.paid_at),
-                                    )
-                                    .map((p) => (
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-100">
+                            <tr>
+                                {[
+                                    "#",
+                                    "Payment ID",
+                                    "Amount",
+                                    "Received By",
+                                    "Method",
+                                    "Date",
+                                    "Note",
+                                ].map((h) => (
+                                    <th
+                                        key={h}
+                                        className="px-4 py-3 text-left text-sm font-semibold text-gray-800"
+                                    >
+                                        {h}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {actualPayments.length ? (
+                                <>
+                                    {actualPayments.map((p, i) => (
                                         <tr
                                             key={p.id}
-                                            className="hover:bg-gray-50"
+                                            className="hover:bg-gray-50 transition"
                                         >
-                                            <td className="px-4 py-2">
-                                                {longDate(p.paid_at)}
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                                {i + 1}
                                             </td>
-                                            <td className="px-4 py-2">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                                #{p.id}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {money(p.amount)}
                                             </td>
-                                            <td className="px-4 py-2 capitalize">
-                                                {p.payment_method || "—"}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {p.reference || "—"}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {p.note || "—"}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {p.receivedByUser?.name ||
-                                                    auth.user?.name ||
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                                {p.received_by_user?.name ||
+                                                    p.received_by ||
                                                     "—"}
                                             </td>
+                                            <td className="px-4 py-3 text-sm text-gray-700 capitalize">
+                                                {p.payment_method || "—"}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                                {formatDate(p.created_at)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                                {p.note || "—"}
+                                            </td>
                                         </tr>
                                     ))}
-                            </tbody>
-                        </table>
-                    ) : (
-                        <p className="text-gray-600 italic">
-                            No payments recorded yet.
-                        </p>
-                    )}
-                </div>
-
-                {/* 🧾 Loan Summary */}
-                <div className="bg-white shadow rounded-lg p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <Info label="Client Name" value={loan.client_name} />
-                        <Info
-                            label="Created By"
-                            value={
-                                loan.created_by
-                                    ? `${loan.created_by.name} (${loan.created_by.email})`
-                                    : "—"
-                            }
-                        />
-                        <Info
-                            label="Status"
-                            value={
-                                <span
-                                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                        loan.status === "active"
-                                            ? "bg-blue-100 text-blue-700"
-                                            : loan.status === "paid"
-                                              ? "bg-green-100 text-green-700"
-                                              : loan.status === "overdue"
-                                                ? "bg-red-100 text-red-700"
-                                                : "bg-yellow-100 text-yellow-700"
-                                    }`}
-                                >
-                                    {loan.status?.toUpperCase()}
-                                </span>
-                            }
-                        />
-                        <Info label="Amount" value={money(loan.amount)} />
-                        <Info
-                            label="Interest Rate"
-                            value={`${loan.interest_rate}%`}
-                        />
-                        <Info
-                            label="Term"
-                            value={`${loan.term_months} month(s)`}
-                        />
-                        <Info
-                            label="Start Date"
-                            value={longDate(loan.start_date)}
-                        />
-                        <Info
-                            label="Due Date"
-                            value={longDate(loan.due_date)}
-                        />
-                        <Info
-                            label="Totals"
-                            value={
-                                <>
-                                    Paid:{" "}
-                                    <span className="text-green-600 font-semibold">
-                                        {money(loan.amount_paid)}
-                                    </span>{" "}
-                                    · Remaining:{" "}
-                                    <span className="text-red-600 font-semibold">
-                                        {money(loan.amount_remaining)}
-                                    </span>
+                                    <tr className="bg-gray-100 font-semibold">
+                                        <td
+                                            colSpan="2"
+                                            className="px-4 py-3 text-right"
+                                        >
+                                            Total:
+                                        </td>
+                                        <td className="px-4 py-3 text-green-700">
+                                            {money(
+                                                actualPayments.reduce(
+                                                    (sum, p) =>
+                                                        sum +
+                                                        Number(p.amount || 0),
+                                                    0,
+                                                ),
+                                            )}
+                                        </td>
+                                        <td colSpan="4"></td>
+                                    </tr>
                                 </>
-                            }
-                        />
-                    </div>
-                </div>
-
-                {/* 📅 Monthly Payment Schedule */}
-                <div className="bg-white shadow rounded-lg p-6">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                        Monthly Payment Schedule
-                    </h3>
-                    {loan.loan_schedules?.length ? (
-                        <table className="min-w-full text-sm border border-gray-100">
-                            <thead className="bg-gray-100">
+                            ) : (
                                 <tr>
-                                    {[
-                                        "Payment",
-                                        "Amount (₵)",
-                                        "Amount Paid (₵)",
-                                        "Amount Left (₵)",
-                                        "Due Date",
-                                        "Status",
-                                    ].map((h) => (
-                                        <th
-                                            key={h}
-                                            className="px-4 py-2 text-left font-semibold text-gray-700"
-                                        >
-                                            {h}
-                                        </th>
-                                    ))}
+                                    <td
+                                        colSpan="7"
+                                        className="text-center py-6 text-gray-600"
+                                    >
+                                        No payments recorded yet.
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {loan.loan_schedules.map((s) => {
-                                    let label = "Pending";
-                                    let colorClass =
-                                        "bg-yellow-100 text-yellow-700";
-
-                                    if (s.is_paid || s.amount_left <= 0.009) {
-                                        label = "Cleared ✅";
-                                        colorClass =
-                                            "bg-green-100 text-green-700";
-                                    } else if (
-                                        s.amount_left < s.amount &&
-                                        s.amount_left > 0.009
-                                    ) {
-                                        label = `Partial — ₵${s.amount_left.toFixed(
-                                            2,
-                                        )} left`;
-                                        colorClass =
-                                            "bg-orange-100 text-orange-700";
-                                    }
-
-                                    return (
-                                        <tr
-                                            key={s.id}
-                                            className="hover:bg-gray-50"
-                                        >
-                                            <td className="px-4 py-2">
-                                                {s.payment_number}
-                                                {["st", "nd", "rd"][
-                                                    s.payment_number - 1
-                                                ] || "th"}{" "}
-                                                Payment
-                                            </td>
-                                            <td className="px-4 py-2 text-gray-800 font-semibold">
-                                                {money(s.amount)}
-                                            </td>
-                                            <td className="px-4 py-2 text-blue-700 font-semibold">
-                                                {money(s.amount_paid)}
-                                            </td>
-                                            <td className="px-4 py-2 text-red-600 font-semibold">
-                                                {money(s.amount_left)}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                {longDate(s.due_date)}
-                                            </td>
-                                            <td className="px-4 py-2">
-                                                <span
-                                                    className={`${colorClass} px-2 py-1 rounded text-xs font-semibold whitespace-nowrap`}
-                                                >
-                                                    {label}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    ) : (
-                        <p className="text-gray-600 italic">
-                            No schedule available yet.
-                        </p>
-                    )}
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-
-                {/* Modals */}
-                {open && (
-                    <PaymentModal
-                        data={data}
-                        setData={setData}
-                        errors={errors}
-                        processing={processing}
-                        onCancel={() => setOpen(false)}
-                        onSubmit={submitPayment}
-                    />
-                )}
-
-                {confirmAction && (
-                    <ConfirmModal
-                        action={confirmAction}
-                        onCancel={() => setConfirmAction(null)}
-                    />
-                )}
             </div>
+
+            {/* 💵 Cash Payment Modal */}
+            {showPaymentModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6 space-y-4 animate-fadeIn">
+                        <h3 className="text-lg font-semibold text-gray-800">
+                            💵 Record Cash Payment
+                        </h3>
+                        <form onSubmit={submitPayment} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Received By
+                                </label>
+                                <input
+                                    type="text"
+                                    value={user.name || ""}
+                                    readOnly
+                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Amount
+                                </label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    step="0.01"
+                                    value={amount}
+                                    onChange={(e) => setAmount(e.target.value)}
+                                    placeholder="Enter amount..."
+                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Note (optional)
+                                </label>
+                                <textarea
+                                    value={note}
+                                    onChange={(e) => setNote(e.target.value)}
+                                    placeholder="Add note..."
+                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPaymentModal(false)}
+                                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md font-semibold hover:bg-gray-300 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition"
+                                >
+                                    Save Payment
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </AuthenticatedLayout>
-    );
-}
-
-/* 🧱 Components */
-function Info({ label, value }) {
-    return (
-        <div>
-            <p className="text-sm text-gray-500">{label}</p>
-            <p className="text-lg text-gray-800 font-medium">{value}</p>
-        </div>
-    );
-}
-
-function PaymentModal({ data, setData, processing, onCancel, onSubmit }) {
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-lg bg-white rounded-lg shadow-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">
-                    Record Cash Payment
-                </h3>
-                <form onSubmit={onSubmit} className="space-y-4">
-                    <Field
-                        label="Amount (₵)"
-                        type="number"
-                        value={data.amount}
-                        onChange={(e) => setData("amount", e.target.value)}
-                        required
-                    />
-                    <Field
-                        label="Payment Date"
-                        type="date"
-                        value={data.paid_at}
-                        onChange={(e) => setData("paid_at", e.target.value)}
-                        required
-                    />
-                    <Field
-                        label="Reference (optional)"
-                        type="text"
-                        value={data.reference}
-                        onChange={(e) => setData("reference", e.target.value)}
-                        placeholder="Txn ID or receipt number"
-                    />
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                            Note (optional)
-                        </label>
-                        <textarea
-                            rows="3"
-                            value={data.note}
-                            onChange={(e) => setData("note", e.target.value)}
-                            className="mt-1 w-full border rounded-md p-2 text-gray-800"
-                        />
-                    </div>
-                    <div className="flex justify-end gap-3 pt-2">
-                        <button
-                            type="button"
-                            onClick={onCancel}
-                            className="px-4 py-2 rounded bg-gray-200 text-gray-900 font-semibold hover:bg-gray-300"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={processing}
-                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                        >
-                            {processing ? "Saving..." : "Save Payment"}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-}
-
-function Field({ label, type = "text", value, onChange, required }) {
-    return (
-        <div>
-            <label className="block text-sm font-medium text-gray-700">
-                {label}
-            </label>
-            <input
-                type={type}
-                value={value}
-                onChange={onChange}
-                required={required}
-                className="mt-1 w-full border rounded-md p-2 text-gray-800 bg-white"
-            />
-        </div>
-    );
-}
-
-function ConfirmModal({ action, onCancel }) {
-    if (!action) return null;
-
-    const theme =
-        action.confirmTheme === "red"
-            ? "bg-red-600 hover:bg-red-700"
-            : "bg-green-600 hover:bg-green-700";
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                    {action.title}
-                </h3>
-                <p className="text-gray-700 mb-6">{action.message}</p>
-                <div className="flex justify-end gap-3">
-                    <button
-                        onClick={onCancel}
-                        className="px-4 py-2 rounded bg-gray-200 text-gray-900 font-semibold hover:bg-gray-300"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={() => {
-                            action.onConfirm?.();
-                            onCancel();
-                        }}
-                        className={`px-4 py-2 rounded text-white font-semibold ${theme}`}
-                    >
-                        {action.confirmLabel || "Confirm"}
-                    </button>
-                </div>
-            </div>
-        </div>
     );
 }

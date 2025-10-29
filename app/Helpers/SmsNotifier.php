@@ -24,7 +24,7 @@ class SmsNotifier
         try {
             // 🔑 Use your provided credentials
             $apiKey   = env('ARKESEL_SMS_API_KEY', 'c1RKRGttRUNCT2ZhTGtPZEZydmg');
-            $senderId = env('ARKESEL_SMS_SENDER_ID', 'Joelaar');
+            $senderId = env('ARKESEL_SMS_SENDER_ID', 'JOELAAR-MC');
             $url      = env('ARKESEL_SMS_URL', 'https://sms.arkesel.com/sms/api');
 
             if (empty($apiKey)) {

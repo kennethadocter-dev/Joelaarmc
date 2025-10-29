@@ -302,7 +302,14 @@ function AdminDashboard({ stats, recentLoans, recentCustomers, role }) {
     const fetchYearData = async (year) => {
         setLoading(true);
         try {
-            const res = await axios.get(`/admin/loans-by-year?year=${year}`);
+            // ✅ detect admin/superadmin path automatically
+            const basePath = window.location.pathname.includes("superadmin")
+                ? "/superadmin"
+                : "/admin";
+
+            const res = await axios.get(
+                `${basePath}/dashboard/loans-by-year?year=${year}`,
+            );
             const payload = res.data;
             const monthTotals = Array(12).fill(0);
             for (let i = 0; i < 12; i++) {

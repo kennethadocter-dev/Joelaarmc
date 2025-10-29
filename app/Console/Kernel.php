@@ -8,6 +8,13 @@ use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 class Kernel extends ConsoleKernel
 {
     /**
+     * 🧭 Explicitly register custom Artisan commands.
+     */
+    protected $commands = [
+        \App\Console\Commands\LoansSyncStatus::class, // ✅ Add your custom command here
+    ];
+
+    /**
      * 📅 Define your application's command schedule.
      *
      * You can use this method to run tasks automatically:
@@ -16,12 +23,12 @@ class Kernel extends ConsoleKernel
      *   - send reminders, etc.
      *
      * Example:
-     *   $schedule->command('loans:recalculate')->dailyAt('00:30');
+     *   $schedule->command('loans:sync-status')->dailyAt('00:30');
      */
     protected function schedule(Schedule $schedule): void
     {
         // Example scheduled commands:
-        // $schedule->command('loans:recalculate')->dailyAt('00:30');
+        // $schedule->command('loans:sync-status')->dailyAt('00:30');
         // $schedule->command('backup:run')->weekly();
     }
 

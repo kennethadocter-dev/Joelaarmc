@@ -5,19 +5,20 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Payment;
 use App\Models\Loan;
-use App\Models\LoanSchedule;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Http;
 use App\Mail\LoanCompletedMail;
 use App\Helpers\ActivityLogger;
 use App\Helpers\SmsNotifier;
+use PDF;
 
 class PaymentController extends Controller
 {
-    /** 🔧 Role-based path helper */
+    /** 🔧 Determine current base route prefix */
     private function basePath()
     {
         $u = auth()->user();
@@ -43,10 +44,10 @@ class PaymentController extends Controller
 
             return Inertia::render('Admin/Payments/Index', [
                 'payments' => $payments,
-                'auth'     => ['user' => auth()->user()],
-                'flash'    => [
+                'auth' => ['user' => auth()->user()],
+                'flash' => [
                     'success' => session('success'),
-                    'error'   => session('error'),
+                    'error' => session('error'),
                 ],
             ]);
         } catch (\Throwable $e) {
@@ -54,168 +55,220 @@ class PaymentController extends Controller
         }
     }
 
-    /** 📝 Create new payment form */
-    public function create(Request $request)
-    {
-        try {
-            $loanId = $request->query('loan_id');
-            $loan = Loan::with('customer')->find($loanId);
-
-            if (!$loan) {
-                return redirect()->route($this->basePath() . '.loans.index')
-                    ->with('error', '⚠️ Please select a valid loan first.');
-            }
-
-            return Inertia::render('Admin/Payments/Create', [
-                'loan' => $loan,
-                'auth' => ['user' => auth()->user()],
-            ]);
-        } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to open payment form.');
-        }
-    }
-
-    /** 💾 Store a new payment + update monthly schedules + notify */
+    /** 💵 Store cash payment from loan show */
     public function store(Request $request)
     {
         try {
-            $validated = $request->validate([
-                'loan_id'   => 'required|exists:loans,id',
-                'amount'    => 'required|numeric|min:1',
-                'paid_at'   => 'required|date',
-                'reference' => 'nullable|string|max:255',
-                'note'      => 'nullable|string|max:500',
-            ]);
+            if (!$request->has('loan_id') && $request->route('loan')) {
+                $request->merge(['loan_id' => $request->route('loan')]);
+            }
 
-            $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
+            $validated = $request->validate([
+                'loan_id' => 'required|exists:loans,id',
+                'amount'  => 'required|numeric|min:1',
+                'note'    => 'nullable|string|max:500',
+            ]);
 
             DB::beginTransaction();
 
-            /** 💰 Create the payment record */
-            $payment = Payment::create([
+            $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
+            Payment::create([
                 'loan_id'        => $loan->id,
                 'received_by'    => auth()->id(),
                 'amount'         => $validated['amount'],
-                'paid_at'        => $validated['paid_at'],
+                'paid_at'        => now(),
                 'payment_method' => 'cash',
-                'reference'      => $validated['reference'] ?? null,
+                'reference'      => null,
                 'note'           => $validated['note'] ?? null,
             ]);
 
-            /** 📅 Distribute payment across unpaid schedules */
-            $remainingPayment = $validated['amount'];
-            $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
+            $this->applyPaymentToLoan($loan, $validated['amount']);
+            DB::commit();
 
-            foreach ($schedules as $schedule) {
-                if ($remainingPayment <= 0) continue;
+            ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for Loan #{$loan->id}");
 
-                $balance = (float)($schedule->amount_left ?? ($schedule->amount - $schedule->amount_paid));
+            return redirect()
+                ->route($this->basePath() . '.loans.show', $loan->id)
+                ->with('success', '✅ Payment recorded successfully!');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return $this->handleError($e, '⚠️ Failed to record payment.');
+        }
+    }
 
-                if ($balance <= 0) continue; // already fully paid
+    /** 💳 Initialize Paystack Payment (returns JSON) */
+    public function initialize(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email'   => 'required|email',
+                'amount'  => 'required|numeric|min:1',
+                'loan_id' => 'nullable|exists:loans,id',
+                'method'  => 'nullable|string',
+            ]);
 
-                if ($remainingPayment >= $balance) {
-                    // Fully pay this schedule
-                    $schedule->amount_paid += $balance;
-                    $remainingPayment -= $balance;
-                } else {
-                    // Partial payment for this schedule
-                    $schedule->amount_paid += $remainingPayment;
-                    $remainingPayment = 0;
-                }
+            $amountInKobo = $validated['amount'] * 100;
 
-                $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
-                $schedule->is_paid = $schedule->amount_left <= 0.01;
-                $schedule->note = $schedule->is_paid
-                    ? 'Fully paid'
-                    : ($schedule->amount_paid > 0 ? 'Partially paid' : 'Pending');
-                $schedule->save();
+            $callbackRoute = match (true) {
+                auth()->user()?->is_super_admin,
+                auth()->user()?->role === 'superadmin' => 'superadmin.paystack.callback',
+                default => 'admin.paystack.callback',
+            };
+
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
+                'Content-Type'  => 'application/json',
+            ])->post(env('PAYSTACK_PAYMENT_URL', 'https://api.paystack.co') . '/transaction/initialize', [
+                'email'        => $validated['email'],
+                'amount'       => $amountInKobo,
+                'callback_url' => route($callbackRoute),
+                'metadata'     => [
+                    'loan_id' => $validated['loan_id'] ?? null,
+                    'initiated_by' => auth()->user()?->name ?? 'System',
+                    'method' => $validated['method'] ?? 'paystack',
+                ],
+            ]);
+
+            $data = $response->json();
+
+            if (isset($data['status']) && $data['status'] === true && isset($data['data']['authorization_url'])) {
+                return response()->json([
+                    'redirect_url' => $data['data']['authorization_url'],
+                    'data' => $data['data']
+                ]);
             }
 
-            /** 🔁 Recalculate and sync loan totals */
-            $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
-            $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
-            $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
-            $loan->save();
-            $loan->recalcStatusAndSave();
+            return response()->json([
+                'error' => 'Unable to initialize Paystack payment.',
+                'response' => $data,
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('❌ Paystack init error', ['msg' => $e->getMessage()]);
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /** 💳 Handle Paystack callback */
+    public function callback(Request $request)
+    {
+        try {
+            $reference = $request->query('reference');
+            if (!$reference) {
+                return redirect()->route($this->basePath() . '.payments.index')
+                    ->with('error', 'Missing payment reference.');
+            }
+
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
+            ])->get('https://api.paystack.co/transaction/verify/' . $reference);
+
+            $data = $response->json();
+
+            if (!isset($data['data']['status']) || $data['data']['status'] !== 'success') {
+                return redirect()->route($this->basePath() . '.payments.index')
+                    ->with('error', 'Payment verification failed.');
+            }
+
+            $details = $data['data'];
+            $loanId  = $details['metadata']['loan_id'] ?? null;
+            $amount  = $details['amount'] / 100;
+            $reference = $details['reference'];
+
+            if (!$loanId) {
+                return redirect()->route($this->basePath() . '.payments.index')
+                    ->with('error', 'Missing loan ID in metadata.');
+            }
+
+            $loan = Loan::with(['customer', 'loanSchedules'])->find($loanId);
+            if (!$loan) {
+                return redirect()->route($this->basePath() . '.payments.index')
+                    ->with('error', 'Loan not found.');
+            }
+
+            DB::beginTransaction();
+
+            if (!Payment::where('reference', $reference)->exists()) {
+                Payment::create([
+                    'loan_id' => $loan->id,
+                    'received_by' => auth()->id() ?? 1,
+                    'amount' => $amount,
+                    'paid_at' => now(),
+                    'payment_method' => 'paystack',
+                    'reference' => $reference,
+                    'note' => 'Paid via Paystack',
+                ]);
+
+                $this->applyPaymentToLoan($loan, $amount);
+            }
 
             DB::commit();
 
-            /** 🔄 Reload relationships for frontend view */
-            $loan->load([
-                'customer',
-                'payments' => fn($q) => $q->orderByDesc('paid_at'),
-                'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
-            ]);
+            ActivityLogger::log('Paystack Payment', "₵{$amount} paid online for Loan #{$loan->id}");
 
-            /** 📨 Notify customer */
-            if (!empty($loan->customer?->phone)) {
-                $msg = "Hi {$loan->customer->full_name}, we've received your payment of ₵" .
-                    number_format($validated['amount'], 2) .
-                    ". Remaining balance: ₵" . number_format($loan->amount_remaining, 2) .
-                    ". Thank you for your payment!";
-                SmsNotifier::send($loan->customer->phone, $msg);
-            }
-
-            /** 🎉 If loan is fully paid */
-            if ($loan->status === 'paid') {
-                ActivityLogger::log('Completed Loan', "Loan #{$loan->id} marked fully paid.");
-
-                if (!empty($loan->customer?->email)) {
-                    Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
-                }
-
-                if (!empty($loan->customer?->phone)) {
-                    $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
-                        number_format($loan->amount, 2) .
-                        " is now fully paid. Thank you for being a valued Joelaar customer!";
-                    SmsNotifier::send($loan->customer->phone, $msg);
-                }
-            }
-
-            ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for loan #{$loan->id}");
-
-            /** ✅ Redirect with success */
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
-                ->with('success', '✅ Payment recorded successfully and schedule updated.');
-
+                ->with('success', "✅ Payment of ₵{$amount} received via Paystack!");
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('❌ PaymentController Error', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return redirect()
-                ->route($this->basePath() . '.loans.index')
-                ->with('error', '⚠️ Failed to record payment.');
+            return $this->handleError($e, '⚠️ Error processing Paystack payment.');
         }
     }
 
-    /** 🧾 Show payment details */
-    public function show(Payment $payment)
+    /** 🧮 Apply payment, update loan + interest if fully paid */
+    private function applyPaymentToLoan(Loan $loan, float $amount)
     {
-        try {
-            $payment->load(['loan.customer', 'receivedByUser']);
-            return Inertia::render('Admin/Payments/Show', [
-                'payment' => $payment,
-                'auth' => ['user' => auth()->user()],
-            ]);
-        } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load payment details.');
+        $remaining = $amount;
+
+        foreach ($loan->loanSchedules()->orderBy('payment_number')->get() as $s) {
+            if ($remaining <= 0) break;
+
+            $balance = $s->amount_left ?? ($s->amount - $s->amount_paid);
+            if ($balance <= 0) continue;
+
+            if ($remaining >= $balance) {
+                $s->amount_paid += $balance;
+                $remaining -= $balance;
+            } else {
+                $s->amount_paid += $remaining;
+                $remaining = 0;
+            }
+
+            $s->amount_left = max(0, $s->amount - $s->amount_paid);
+            $s->is_paid = $s->amount_left <= 0.01;
+            $s->note = $s->is_paid ? 'Fully paid' : 'Partially paid';
+            $s->save();
+        }
+
+        $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
+        $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
+        $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
+        $loan->save();
+
+        // ✅ Record interest when fully paid
+        if ($loan->status === 'paid') {
+            $interestEarned = ($loan->amount * $loan->interest_rate / 100);
+            $loan->interest_earned = $interestEarned;
+            $loan->save();
+
+            ActivityLogger::log('Completed Loan', "Loan #{$loan->id} fully paid. Interest earned: ₵{$interestEarned}");
+
+            if ($loan->customer?->email) {
+                Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
+            }
+
+            if ($loan->customer?->phone) {
+                $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
+                    number_format($loan->amount, 2) .
+                    " is now fully paid. Thank you for being a valued customer!";
+                SmsNotifier::send($loan->customer->phone, $msg);
+            }
         }
     }
 
-    /** 🧰 Error handler */
-    private function handleError(\Throwable $e, string $message)
+    /** ⚠️ Error handler */
+    private function handleError(\Throwable $e, string $msg)
     {
-        Log::error('❌ PaymentController Error', [
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString(),
-        ]);
-
-        return redirect()
-            ->route($this->basePath() . '.loans.index')
-            ->with('error', $message);
+        Log::error('❌ PaymentController', ['error' => $e->getMessage()]);
+        return redirect()->back()->with('error', $msg);
     }
 }

@@ -1,29 +1,29 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useState, useEffect } from "react";
-// import { toast } from "react-hot-toast"; // optional
+import { Toaster, toast } from "react-hot-toast";
 
 export default function LoansIndex() {
     const {
         loans = [],
-        filters = {},
         summary = {},
+        filters = {},
         auth = {},
         basePath = "admin",
+        flash = {},
     } = usePage().props;
 
     const user = auth?.user || {};
     const [clientSearch, setClientSearch] = useState(filters.client || "");
     const [status, setStatus] = useState(filters.status || "");
 
-    // ✅ Role permissions
-    const canManage =
-        ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
-        user?.is_super_admin;
-
-    // 🔁 Debounced search/filter
     useEffect(() => {
-        const t = setTimeout(() => {
+        if (flash?.success) toast.success(flash.success);
+        if (flash?.error) toast.error(flash.error);
+    }, [flash]);
+
+    useEffect(() => {
+        const delay = setTimeout(() => {
             router.get(
                 route(`${basePath}.loans.index`),
                 {
@@ -33,7 +33,7 @@ export default function LoansIndex() {
                 { preserveState: true, replace: true },
             );
         }, 400);
-        return () => clearTimeout(t);
+        return () => clearTimeout(delay);
     }, [clientSearch, status]);
 
     const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
@@ -45,7 +45,6 @@ export default function LoansIndex() {
                   day: "numeric",
               })
             : "—";
-
     const daysOverdue = (dueDate) => {
         if (!dueDate) return null;
         const due = new Date(dueDate);
@@ -54,9 +53,12 @@ export default function LoansIndex() {
         return diff > 0 ? diff : null;
     };
 
-    // 📊 Summary card component
+    const canManage =
+        ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
+        user?.is_super_admin;
+
     const Card = ({ title, sub, count = 0, sum = 0, onView }) => (
-        <div className="bg-white rounded-xl shadow-md hover:shadow-lg transition transform hover:scale-[1.02] w-64 p-5 flex flex-col gap-2 border border-gray-100">
+        <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-transform duration-200 w-64 p-5 flex flex-col gap-2 border border-gray-100">
             <div className="text-sm font-medium text-gray-500">{title}</div>
             <div className="text-2xl font-bold text-gray-800">{count}</div>
             <div className="text-sm text-gray-600">
@@ -95,6 +97,7 @@ export default function LoansIndex() {
             }
         >
             <Head title="All Loans" />
+            <Toaster position="top-right" />
 
             <div className="py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
                 {/* 💠 Summary Cards */}
@@ -131,7 +134,7 @@ export default function LoansIndex() {
                     </div>
                 </div>
 
-                {/* 🔍 Filters + Create */}
+                {/* 🔍 Filters + Actions */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
                         <select
@@ -154,6 +157,15 @@ export default function LoansIndex() {
                             className="border border-gray-300 rounded-md px-3 py-2 text-sm w-full md:w-64 bg-white text-gray-800"
                         />
 
+                        <button
+                            onClick={() =>
+                                router.reload({ only: ["loans", "summary"] })
+                            }
+                            className="px-4 py-2 text-sm font-semibold rounded-md bg-green-600 text-white hover:bg-green-700 transition shadow"
+                        >
+                            Refresh
+                        </button>
+
                         {(status || clientSearch) && (
                             <button
                                 onClick={() => {
@@ -165,9 +177,9 @@ export default function LoansIndex() {
                                         { replace: true },
                                     );
                                 }}
-                                className="px-3 py-2 text-sm font-semibold rounded-md bg-gray-800 text-white hover:bg-black shadow transition"
+                                className="px-4 py-2 text-sm font-semibold rounded-md bg-gray-800 text-white hover:bg-black transition shadow"
                             >
-                                Clear Filters ✨
+                                Clear Filters
                             </button>
                         )}
                     </div>
@@ -190,6 +202,7 @@ export default function LoansIndex() {
                                 {[
                                     "ID",
                                     "Client Name",
+                                    "Created By",
                                     "Amount",
                                     "Interest",
                                     "Term",
@@ -218,31 +231,34 @@ export default function LoansIndex() {
                                     return (
                                         <tr
                                             key={loan.id}
-                                            className={`hover:bg-gray-50 transition ${
+                                            className={`hover:bg-gray-100 transition-colors duration-150 ${
                                                 loan.status === "overdue"
                                                     ? "bg-red-50"
                                                     : ""
                                             }`}
                                         >
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm font-medium text-gray-700">
                                                 #{loan.id}
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {loan.client_name || "—"}
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                                {loan.user?.name || "—"}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {money(loan.amount)}
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {loan.interest_rate}%
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {loan.term_months}
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {formatDate(loan.start_date)}
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm text-gray-700">
                                                 {loan.due_date ? (
                                                     <>
                                                         {formatDate(
@@ -268,19 +284,18 @@ export default function LoansIndex() {
                                                     {loan.status}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3 text-sm">
+                                            <td className="px-4 py-3 text-sm font-medium text-gray-700">
                                                 {money(
                                                     loan.amount_remaining ?? 0,
                                                 )}
                                             </td>
-
-                                            {/* 🟦 Only View button remains */}
                                             <td className="px-4 py-3 text-sm flex flex-wrap gap-2">
                                                 <Link
                                                     href={route(
                                                         `${basePath}.loans.show`,
                                                         loan.id,
                                                     )}
+                                                    preserveScroll
                                                     className="px-3 py-1.5 bg-indigo-600 text-white rounded-full text-xs font-semibold hover:bg-indigo-700 transition"
                                                 >
                                                     View Loan
@@ -292,7 +307,7 @@ export default function LoansIndex() {
                             ) : (
                                 <tr>
                                     <td
-                                        colSpan="10"
+                                        colSpan="11"
                                         className="text-center py-6 text-gray-600"
                                     >
                                         No loans found.

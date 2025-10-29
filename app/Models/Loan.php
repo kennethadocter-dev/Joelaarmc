@@ -69,61 +69,30 @@ class Loan extends Model
     }
 
     /**
-     * 🔁 Recalculate totals and update loan status.
-     * Can be safely called after any payment or schedule update.
+     * 🔁 Recalculate totals and update loan status accurately.
+     * Ensures new loans start as pending/active and only become "paid" when fully cleared.
      */
     public function recalcStatusAndSave(): void
-    {
-        // Get sums directly from the database for accuracy
-        $totals = DB::table('loan_schedules')
-            ->selectRaw('SUM(amount_paid) as total_paid, SUM(amount_left) as total_left')
-            ->where('loan_id', $this->id)
-            ->first();
+{
+    $totalPaid = $this->loanSchedules()->sum('amount_paid');
+    $totalLeft = $this->loanSchedules()->sum('amount_left');
 
-        $this->amount_paid = (float) ($totals->total_paid ?? 0);
-        $this->amount_remaining = (float) ($totals->total_left ?? 0);
-
-        // Prevent negative remainder
-        if ($this->amount_remaining < 0) {
-            $this->amount_remaining = 0;
-        }
-
-        // Update interest earned dynamically
-        $this->interest_earned = max(0, $this->amount_paid - $this->amount);
-
-        // Determine loan status
-        if ($this->amount_remaining <= 0.01) {
-            $this->status = 'paid';
-        } else {
-            $dueDate = $this->due_date
-                ? Carbon::parse($this->due_date)
-                : ($this->start_date
-                    ? Carbon::parse($this->start_date)->addMonths((int) $this->term_months)
-                    : null);
-
-            if ($dueDate && now()->greaterThan($dueDate) && $this->status !== 'paid') {
-                $this->status = 'overdue';
-            } elseif ($this->status === 'pending') {
-                // stays pending until activated
-            } else {
-                $this->status = 'active';
-            }
-        }
-
-        $this->save();
-
-        // 👤 If loan fully paid, deactivate customer (if no other active loans)
-        if ($this->status === 'paid' && $this->customer) {
-            $hasOtherActive = $this->customer->loans()
-                ->whereIn('status', ['active', 'pending', 'overdue'])
-                ->exists();
-
-            if (! $hasOtherActive) {
-                $this->customer->status = 'inactive';
-                $this->customer->save();
-            }
-        }
+    // 🧮 Normalize small rounding issues (e.g., 0.009 ≈ 0)
+    if ($totalLeft < 0.05) {
+        $totalLeft = 0;
     }
+
+    $this->amount_paid = round($totalPaid, 2);
+    $this->amount_remaining = round($totalLeft, 2);
+
+    if ($this->amount_remaining <= 0) {
+        $this->status = 'paid';
+    } elseif ($this->status === 'pending') {
+        $this->status = 'active';
+    }
+
+    $this->save();
+}
 
     /** 💰 Total amount due (principal + interest) */
     public function getTotalDueAttribute(): float

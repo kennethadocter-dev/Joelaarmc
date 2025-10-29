@@ -11,9 +11,11 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // ✅ Always create / update the superadmin account
+        // Run the SuperAdmin seeder
         $this->call([
             SuperAdminSeeder::class,
         ]);
+
+        $this->command->info('✅ Super Admin seeder executed successfully.');
     }
 }

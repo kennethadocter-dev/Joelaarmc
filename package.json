@@ -8,7 +8,9 @@
         "preview": "vite preview",
         "serve": "php artisan serve",
         "dev:all": "concurrently \"npm run serve\" \"npm run dev\"",
-        "dev:app": "concurrently \"php artisan serve\" \"npm run dev -- --open\""
+        "dev:app": "concurrently \"php artisan serve\" \"npm run dev -- --open\"",
+        "offline": "concurrently \"php artisan serve\" \"npm run dev\"",
+        "offline:sync": "concurrently \"php artisan loans:sync-status && php artisan serve\" \"npm run dev\""
     },
     "devDependencies": {
         "@headlessui/react": "^2.0.0",

@@ -3,8 +3,7 @@ import forms from "@tailwindcss/forms";
 
 /** @type {import('tailwindcss').Config} */
 export default {
-    // ✅ Updated: no more warning, still stays in light mode permanently
-    darkMode: "class",
+    darkMode: "class", // ✅ stays in light mode unless toggled manually
 
     content: [
         "./vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php",
@@ -23,24 +22,25 @@ export default {
             },
 
             colors: {
+                // 🌤 Backgrounds and Surfaces
                 background: "#f9fafb",
                 surface: "#ffffff",
 
-                // Default text shades
+                // 🖋 Text shades
                 text: {
                     DEFAULT: "#111111",
                     muted: "#333333",
-                    light: "#ffffff", // ✅ white text for dark backgrounds
+                    light: "#ffffff",
                 },
 
-                // Sidebar and surfaces
+                // 🧭 Sidebar theme
                 sidebar: {
                     bg: "#ffffff",
                     text: "#111111",
                     active: "#2563eb",
                 },
 
-                // Main color palette with automatic contrast
+                // 🎨 Main brand palette
                 primary: {
                     DEFAULT: "#4f46e5",
                     hover: "#4338ca",
@@ -59,7 +59,7 @@ export default {
                 warning: {
                     DEFAULT: "#f59e0b",
                     hover: "#d97706",
-                    contrast: "#111111", // ⚠️ black text works better on yellow
+                    contrast: "#111111",
                 },
                 info: {
                     DEFAULT: "#2563eb",
@@ -73,11 +73,13 @@ export default {
                 },
             },
 
+            // 🌫 Softer shadows for modern flat UI
             boxShadow: {
                 soft: "0 2px 6px rgba(0,0,0,0.08)",
                 mdsoft: "0 4px 10px rgba(0,0,0,0.1)",
             },
 
+            // 📏 Responsive container breakpoints
             container: {
                 center: true,
                 padding: "1rem",
@@ -88,8 +90,29 @@ export default {
                     xl: "1240px",
                 },
             },
+
+            // 🚫 Restrict transitions globally (base safety)
+            transitionProperty: {
+                colors: "background-color, border-color, color, fill, stroke",
+            },
         },
     },
 
-    plugins: [forms],
+    plugins: [
+        forms,
+        // Optional plugin for smoother transitions without flicker
+        function ({ addBase }) {
+            addBase({
+                "*, ::before, ::after": {
+                    transitionProperty:
+                        "background-color, border-color, color, fill, stroke",
+                    transitionTimingFunction: "ease-in-out",
+                    transitionDuration: "150ms",
+                    backfaceVisibility: "hidden",
+                    WebkitFontSmoothing: "antialiased",
+                    transform: "translateZ(0)",
+                },
+            });
+        },
+    ],
 };

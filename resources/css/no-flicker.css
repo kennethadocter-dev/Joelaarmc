@@ -1,0 +1,36 @@
+/* ===================================================
+   🧊 no-flicker.css (Scoped for Loan Tables Only)
+   =================================================== */
+
+/* 🎯 Target only the loan table container */
+.loan-table table,
+.loan-table thead,
+.loan-table tbody,
+.loan-table tr,
+.loan-table th,
+.loan-table td {
+    transition: none !important;
+    transform: none !important;
+}
+
+/* ✅ Only background color transitions remain */
+.loan-table tr:hover {
+    background-color: #f3f4f6 !important; /* same as Tailwind bg-gray-100 */
+    transition: background-color 0.15s ease-in-out !important;
+}
+
+/* 🧱 Ensure smooth GPU rendering */
+.loan-table {
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+/* 🧊 Bonus: cards around the table also stabilize */
+.loan-table .card,
+.loan-table .bg-white,
+.loan-table .rounded-lg,
+.loan-table .shadow {
+    transform: translateZ(0);
+    will-change: transform;
+}

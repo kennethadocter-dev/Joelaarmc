@@ -11,8 +11,8 @@ use App\Http\Controllers\Admin\ClauseController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\SystemController;
 use App\Http\Controllers\Admin\SettingsController;
-use App\Http\Controllers\Admin\PaystackController;
 use App\Http\Controllers\Admin\ReportsController;
+use App\Http\Controllers\Admin\PaymentController;
 
 // ===============================================================
 // ✅ SHARED CONTROLLERS (global in app/Http/Controllers)
@@ -79,6 +79,10 @@ Route::middleware(['auth'])->group(function () {
         // 🏠 Dashboard
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('admin.dashboard');
 
+        // 📊 Chart Data (for Dashboard Graph)
+        Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])
+            ->name('admin.dashboard.loansByYear');
+
         // 👥 Customers
         Route::get('/customers/search', [CustomerController::class, 'search'])->name('admin.customers.search');
         Route::post('/customers/{id}/toggle', [CustomerController::class, 'toggleStatus'])->name('admin.customers.toggleStatus');
@@ -88,7 +92,19 @@ Route::middleware(['auth'])->group(function () {
         // 💰 Loans
         Route::resource('loans', LoanController::class)->names('admin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('admin.loans.activate');
-        Route::post('/loans/{loan}/payment', [LoanController::class, 'recordPayment'])->name('admin.loans.payment');
+
+        // 💵 Record Cash Payment
+        Route::post('/loans/{loan}/record-payment', [LoanController::class, 'recordPayment'])->name('admin.loans.recordPayment');
+
+        // 💵 Payments
+        Route::post('/payments/store', [PaymentController::class, 'store'])->name('admin.payments.store');
+        Route::post('/loans/{loan}/payment', [PaymentController::class, 'store'])->name('admin.loans.payment');
+
+        // 🧾 View or Download Individual Payment Receipt (PDF)
+        Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])
+            ->name('admin.loans.viewReceipt');
+
+        // 🔗 Customer → Loan view
         Route::get('/customers/{customer}/loans', [LoanController::class, 'customerLoans'])->name('admin.customers.loans');
         Route::get('/loans-by-year', [LoanController::class, 'getLoansByYear'])->name('admin.loans.byYear');
 
@@ -99,7 +115,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/reports/{loan}/send-agreement', fn() => redirect()->route('admin.reports.index'));
         Route::delete('/reports/failures/clear', [ReportsController::class, 'clearEmailFailures'])->name('admin.reports.clearFailures');
 
-        // ⚙️ Business Settings
+        // ⚙️ Settings
         Route::get('/settings', [SettingsController::class, 'index'])->name('admin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('admin.settings.update');
         Route::put('/settings/reset', [SettingsController::class, 'reset'])->name('admin.settings.reset');
@@ -112,9 +128,13 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/system/backups', [SystemController::class, 'listBackups'])->name('admin.system.listBackups');
         Route::get('/system/download/{file}', [SystemController::class, 'downloadBackup'])->where('file', '.*')->name('admin.system.download');
         Route::post('/system/upload', [SystemController::class, 'uploadBackup'])->name('admin.system.upload');
-        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('admin.system.previewReset'); // ✅ added
-        Route::delete('/system/delete/{file}', [SystemController::class, 'deleteBackup'])->name('admin.system.deleteBackup'); // ✅ added
-        Route::get('/system/refresh', [SystemController::class, 'refreshBackups'])->name('admin.system.refreshBackups'); // ✅ added
+        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('admin.system.previewReset');
+        Route::delete('/system/delete/{file}', [SystemController::class, 'deleteBackup'])->name('admin.system.deleteBackup');
+        Route::get('/system/refresh', [SystemController::class, 'refreshBackups'])->name('admin.system.refreshBackups');
+
+        // 💳 Paystack Integration (Admin via PaymentController)
+        Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('admin.paystack.initialize');
+        Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('admin.paystack.callback');
     });
 
     /* ====================================================================
@@ -124,6 +144,10 @@ Route::middleware(['auth'])->group(function () {
 
         // 🏠 Dashboard
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('superadmin.dashboard');
+
+        // 📊 Chart Data (for Dashboard Graph)
+        Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])
+            ->name('superadmin.dashboard.loansByYear');
 
         // 👥 Manage Users
         Route::resource('users', UserController::class)->names('superadmin.users');
@@ -138,7 +162,19 @@ Route::middleware(['auth'])->group(function () {
         // 💰 Loans
         Route::resource('loans', LoanController::class)->names('superadmin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('superadmin.loans.activate');
-        Route::post('/loans/{loan}/payment', [LoanController::class, 'recordPayment'])->name('superadmin.loans.payment');
+
+        // 💵 Record Cash Payment
+        Route::post('/loans/{loan}/record-payment', [LoanController::class, 'recordPayment'])->name('superadmin.loans.recordPayment');
+
+        // 💵 Payments
+        Route::post('/payments/store', [PaymentController::class, 'store'])->name('superadmin.payments.store');
+        Route::post('/loans/{loan}/payment', [PaymentController::class, 'store'])->name('superadmin.loans.payment');
+
+        // 🧾 View or Download Individual Payment Receipt (PDF)
+        Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])
+            ->name('superadmin.loans.viewReceipt');
+
+        // 🔗 Customer → Loan view
         Route::get('/customers/{customer}/loans', [LoanController::class, 'customerLoans'])->name('superadmin.customers.loans');
         Route::get('/loans-by-year', [LoanController::class, 'getLoansByYear'])->name('superadmin.loans.byYear');
 
@@ -161,16 +197,16 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/system/backups', [SystemController::class, 'listBackups'])->name('superadmin.system.listBackups');
         Route::get('/system/download/{file}', [SystemController::class, 'downloadBackup'])->where('file', '.*')->name('superadmin.system.download');
         Route::post('/system/upload', [SystemController::class, 'uploadBackup'])->name('superadmin.system.upload');
-        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('superadmin.system.previewReset'); // ✅ added
-        Route::delete('/system/delete/{file}', [SystemController::class, 'deleteBackup'])->name('superadmin.system.deleteBackup'); // ✅ added
-        Route::get('/system/refresh', [SystemController::class, 'refreshBackups'])->name('superadmin.system.refreshBackups'); // ✅ added
+        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('superadmin.system.previewReset');
+        Route::delete('/system/delete/{file}', [SystemController::class, 'deleteBackup'])->name('superadmin.system.deleteBackup');
+        Route::get('/system/refresh', [SystemController::class, 'refreshBackups'])->name('superadmin.system.refreshBackups');
 
-        // 💳 Paystack
-        Route::post('/paystack/initialize', [PaystackController::class, 'initialize'])->name('superadmin.paystack.initialize');
-        Route::get('/paystack/callback', [PaystackController::class, 'callback'])->name('superadmin.paystack.callback');
+        // 💳 Paystack Integration (Superadmin via PaymentController)
+        Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('superadmin.paystack.initialize');
+        Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('superadmin.paystack.callback');
 
-        // 🧾 Activity Log
-        Route::get('/activity', [ActivityController::class, 'index'])->name('superadmin.activity.index');
+        // 🧾 Activity Logs
+        Route::get('/activity', [ActivityController::class, 'index'])->name('superadmin.activity');
         Route::delete('/activity/clear', [ActivityController::class, 'clear'])->name('superadmin.activity.clear');
     });
 

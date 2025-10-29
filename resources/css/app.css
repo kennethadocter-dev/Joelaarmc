@@ -238,3 +238,5 @@ body {
     padding: 0.75rem 1.25rem;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
 }
+
+@import "./no-flicker.css";

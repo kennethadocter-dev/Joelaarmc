@@ -100,7 +100,7 @@ class CustomerController extends Controller
         }
     }
 
-    /** 💾 Store new customer + welcome email + SMS */
+    /** 💾 Store new customer + welcome email + SMS + redirect to loan creation */
     public function store(Request $request)
     {
         try {
@@ -141,15 +141,18 @@ class CustomerController extends Controller
             }
 
             $validated = $validator->validated();
+
+            // 🧾 Create customer
             $customer = Customer::create(array_merge($validated, [
                 'status' => $validated['status'] ?? 'inactive',
             ]));
 
+            // 👥 Save guarantors
             foreach ($validated['guarantors'] ?? [] as $g) {
                 $customer->guarantors()->create($g);
             }
 
-            // 🔐 Create linked user + notify
+            // 🔐 Create linked user for portal login
             $plainPassword = Str::random(8);
             $loginEmail = $customer->email ?: (Str::slug($customer->full_name) . '@joelaar.local');
 
@@ -164,36 +167,37 @@ class CustomerController extends Controller
                     ]
                 );
 
-                // 📨 Email (Welcome + Login)
+                // 📨 Send email if possible
                 if (!empty($customer->email)) {
                     Mail::to($customer->email)->send(new CustomerWelcomeMail($customer));
                     Mail::to($customer->email)->send(new CustomerLoginMail($customer, $user->email, $plainPassword));
                 }
 
-                // 💬 SMS: send credentials
-               if (!empty($customer->phone)) {
-                $settings = \App\Models\Setting::first();
-                $companyName = $settings?->company_name ?? 'Joelaar Micro-Credit';
+                // 💬 Send SMS credentials
+                if (!empty($customer->phone)) {
+                    $settings = Setting::first();
+                    $companyName = $settings?->company_name ?? 'Joelaar Micro-Credit';
 
-                $msg = "Welcome {$customer->full_name}! 🎉 Your {$companyName} login is ready.
-    Email: {$user->email}
-    Password: {$plainPassword}
-    Login: " . url('/login');
+                    $msg = "Welcome {$customer->full_name}! 🎉 Your {$companyName} login is ready.
+Email: {$user->email}
+Password: {$plainPassword}
+Login: " . url('/login');
 
-                SmsNotifier::send($customer->phone, $msg);
-            }
+                    SmsNotifier::send($customer->phone, $msg);
+                }
             } catch (\Throwable $e) {
                 Log::warning('⚠️ Failed creating linked user', ['error' => $e->getMessage()]);
             }
 
             ActivityLogger::log('Created Customer', "Customer {$customer->full_name} created by " . auth()->user()->name);
 
+            // ✅ Redirect to loan creation with visible flash message
             return redirect()
                 ->route($this->basePath() . '.loans.create', [
                     'customer_id' => $customer->id,
                     'client_name' => $customer->full_name,
                 ])
-                ->with('success', '✅ Customer created successfully and credentials sent.');
+                ->with('success', '✅ Customer created successfully. You can now create a loan.');
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to create customer.');
         }
@@ -353,6 +357,8 @@ class CustomerController extends Controller
             'error' => $e->getMessage(),
         ]);
 
-        return redirect()->route($this->basePath() . '.customers.index')->with('error', $message);
+        return redirect()
+            ->route($this->basePath() . '.customers.index')
+            ->with('error', $message);
     }
 }
