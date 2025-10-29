@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Log;
 
 // ===============================================================
 // ✅ ADMIN CONTROLLERS (in app/Http/Controllers/Admin)
@@ -222,3 +223,21 @@ Route::middleware(['auth'])->group(function () {
    🔐 AUTH ROUTES (login / logout)
    ======================================================================== */
 require __DIR__ . '/auth.php';
+
+/* ========================================================================
+   🧩 TEMPORARY: CSRF Debug Route (Remove after test)
+   ======================================================================== */
+Route::post('/csrf-check', function (\Illuminate\Http\Request $request) {
+    Log::info('🔍 CSRF Debug', [
+        'token_from_form' => $request->_token,
+        'session_token'   => $request->session()->token(),
+        'headers'         => $request->headers->all(),
+    ]);
+
+    return response()->json([
+        'token_from_form' => $request->_token,
+        'session_token'   => $request->session()->token(),
+        'session_id'      => session()->getId(),
+        'cookies'         => request()->cookies->all(),
+    ]);
+});
