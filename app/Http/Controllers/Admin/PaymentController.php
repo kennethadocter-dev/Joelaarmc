@@ -115,17 +115,22 @@ class PaymentController extends Controller
                 default => 'admin.paystack.callback',
             };
 
+            // ✅ Always use absolute URL for live domain
+            $callbackUrl = route($callbackRoute, [], true);
+
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
                 'Content-Type'  => 'application/json',
             ])->post(env('PAYSTACK_PAYMENT_URL', 'https://api.paystack.co') . '/transaction/initialize', [
                 'email'        => $validated['email'],
                 'amount'       => $amountInKobo,
-                'callback_url' => route($callbackRoute),
+                'callback_url' => $callbackUrl,
                 'metadata'     => [
                     'loan_id' => $validated['loan_id'] ?? null,
                     'initiated_by' => auth()->user()?->name ?? 'System',
                     'method' => $validated['method'] ?? 'paystack',
+                    'environment' => app()->environment(),
+                    'app_url' => config('app.url'),
                 ],
             ]);
 
@@ -137,6 +142,8 @@ class PaymentController extends Controller
                     'data' => $data['data']
                 ]);
             }
+
+            Log::warning('⚠️ Paystack initialization failed', ['response' => $data]);
 
             return response()->json([
                 'error' => 'Unable to initialize Paystack payment.',
