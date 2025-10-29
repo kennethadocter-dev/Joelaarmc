@@ -59,6 +59,7 @@ class PaymentController extends Controller
     public function store(Request $request)
     {
         try {
+            // ✅ Handle both /loans/{loan}/record-payment and /payments/store
             if (!$request->has('loan_id') && $request->route('loan')) {
                 $request->merge(['loan_id' => $request->route('loan')]);
             }
@@ -72,31 +73,44 @@ class PaymentController extends Controller
             DB::beginTransaction();
 
             $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
-            Payment::create([
+
+            // ✅ Fallback user ID in case auth()->id() is null (Render session loss)
+            $userId = auth()->id() ?? 1;
+
+            // 💾 Create Payment record
+            $payment = Payment::create([
                 'loan_id'        => $loan->id,
-                'received_by'    => auth()->id(),
+                'received_by'    => $userId,
                 'amount'         => $validated['amount'],
                 'paid_at'        => now(),
                 'payment_method' => 'cash',
-                'reference'      => null,
-                'note'           => $validated['note'] ?? null,
+                'reference'      => 'CASH-' . now()->timestamp,
+                'note'           => $validated['note'] ?? 'Cash payment recorded',
             ]);
 
+            // 🔄 Apply payment to loan schedules
             $this->applyPaymentToLoan($loan, $validated['amount']);
             DB::commit();
 
-            ActivityLogger::log('Created Payment', "₵{$validated['amount']} recorded for Loan #{$loan->id}");
+            ActivityLogger::log('Cash Payment', "₵{$validated['amount']} recorded for Loan #{$loan->id}");
 
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
-                ->with('success', '✅ Payment recorded successfully!');
+                ->with('success', '✅ Cash payment recorded successfully!');
         } catch (\Throwable $e) {
             DB::rollBack();
-            return $this->handleError($e, '⚠️ Failed to record payment.');
+
+            Log::error('❌ Cash Payment Error', [
+                'message' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
+            ]);
+
+            return $this->handleError($e, '⚠️ Failed to record cash payment.');
         }
     }
 
-    /** 💳 Initialize Paystack Payment (returns JSON) */
+    /** 💳 Initialize Paystack Payment (for future online payments) */
     public function initialize(Request $request)
     {
         try {
@@ -115,7 +129,6 @@ class PaymentController extends Controller
                 default => 'admin.paystack.callback',
             };
 
-            // ✅ Always use absolute URL for live domain
             $callbackUrl = route($callbackRoute, [], true);
 
             $response = Http::withHeaders([
@@ -144,11 +157,7 @@ class PaymentController extends Controller
             }
 
             Log::warning('⚠️ Paystack initialization failed', ['response' => $data]);
-
-            return response()->json([
-                'error' => 'Unable to initialize Paystack payment.',
-                'response' => $data,
-            ], 422);
+            return response()->json(['error' => 'Unable to initialize Paystack payment.'], 422);
         } catch (\Throwable $e) {
             Log::error('❌ Paystack init error', ['msg' => $e->getMessage()]);
             return response()->json(['error' => $e->getMessage()], 500);
@@ -221,7 +230,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 🧮 Apply payment, update loan + interest if fully paid */
+    /** 🧮 Apply payment to schedules */
     private function applyPaymentToLoan(Loan $loan, float $amount)
     {
         $remaining = $amount;
@@ -251,7 +260,6 @@ class PaymentController extends Controller
         $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
         $loan->save();
 
-        // ✅ Record interest when fully paid
         if ($loan->status === 'paid') {
             $interestEarned = ($loan->amount * $loan->interest_rate / 100);
             $loan->interest_earned = $interestEarned;
@@ -259,12 +267,8 @@ class PaymentController extends Controller
 
             ActivityLogger::log('Completed Loan', "Loan #{$loan->id} fully paid. Interest earned: ₵{$interestEarned}");
 
-            if ($loan->customer?->email) {
-                Mail::to($loan->customer->email)->send(new LoanCompletedMail($loan));
-            }
-
             if ($loan->customer?->phone) {
-                $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan of ₵" .
+                $msg = "🎉 Hi {$loan->customer->full_name}, your loan of ₵" .
                     number_format($loan->amount, 2) .
                     " is now fully paid. Thank you for being a valued customer!";
                 SmsNotifier::send($loan->customer->phone, $msg);
@@ -272,10 +276,15 @@ class PaymentController extends Controller
         }
     }
 
-    /** ⚠️ Error handler */
+    /** ⚠️ Handle errors gracefully */
     private function handleError(\Throwable $e, string $msg)
     {
-        Log::error('❌ PaymentController', ['error' => $e->getMessage()]);
+        Log::error('❌ PaymentController', [
+            'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ]);
+
         return redirect()->back()->with('error', $msg);
     }
 }

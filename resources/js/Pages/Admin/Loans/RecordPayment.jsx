@@ -6,7 +6,9 @@ import { toast, Toaster } from "react-hot-toast";
 export default function RecordPayment() {
     const { loan, expectedAmount, auth, flash, basePath } = usePage().props;
 
+    // Include loan_id explicitly
     const { data, setData, post, processing, errors } = useForm({
+        loan_id: loan?.id || "",
         amount: expectedAmount || "",
         note: "",
     });
@@ -18,7 +20,18 @@ export default function RecordPayment() {
 
     const submit = (e) => {
         e.preventDefault();
-        post(route(`${basePath}.loans.recordPayment`, loan.id));
+
+        // Explicitly send loan_id and data
+        post(route(`${basePath}.loans.recordPayment`, loan.id), {
+            preserveScroll: true,
+            onSuccess: () => toast.success("✅ Payment recorded successfully!"),
+            onError: (errors) => {
+                console.error("Payment failed:", errors);
+                toast.error(
+                    "⚠️ Failed to record payment. Check console for details.",
+                );
+            },
+        });
     };
 
     return (

@@ -93,8 +93,8 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('loans', LoanController::class)->names('admin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('admin.loans.activate');
 
-        // 💵 Record Cash Payment
-        Route::post('/loans/{loan}/record-payment', [LoanController::class, 'recordPayment'])->name('admin.loans.recordPayment');
+        // 💵 Record Cash Payment (✅ moved to PaymentController)
+        Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('admin.loans.recordPayment');
 
         // 💵 Payments
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('admin.payments.store');
@@ -163,8 +163,8 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('loans', LoanController::class)->names('superadmin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('superadmin.loans.activate');
 
-        // 💵 Record Cash Payment
-        Route::post('/loans/{loan}/record-payment', [LoanController::class, 'recordPayment'])->name('superadmin.loans.recordPayment');
+        // 💵 Record Cash Payment (✅ moved to PaymentController)
+        Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('superadmin.loans.recordPayment');
 
         // 💵 Payments
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('superadmin.payments.store');
