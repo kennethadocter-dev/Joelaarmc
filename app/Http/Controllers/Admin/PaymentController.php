@@ -22,7 +22,12 @@ class PaymentController extends Controller
     private function basePath()
     {
         $u = auth()->user();
-        return ($u && ($u->is_super_admin || $u->role === 'superadmin'))
+        if (!$u) {
+            Log::warning('⚠️ basePath() called with no authenticated user');
+            return 'admin';
+        }
+
+        return ($u->is_super_admin || $u->role === 'superadmin')
             ? 'superadmin'
             : 'admin';
     }
@@ -59,6 +64,14 @@ class PaymentController extends Controller
     public function store(Request $request)
     {
         try {
+            Log::info('🧾 Payment Debug Start', [
+                'incoming_data' => $request->all(),
+                'route_params' => $request->route()->parameters(),
+                'user_id' => auth()->id(),
+                'env' => app()->environment(),
+                'url' => config('app.url'),
+            ]);
+
             // ✅ Handle both /loans/{loan}/record-payment and /payments/store
             if (!$request->has('loan_id') && $request->route('loan')) {
                 $request->merge(['loan_id' => $request->route('loan')]);
@@ -88,6 +101,8 @@ class PaymentController extends Controller
                 'note'           => $validated['note'] ?? 'Cash payment recorded',
             ]);
 
+            Log::info('✅ Payment created successfully', ['payment_id' => $payment->id]);
+
             // 🔄 Apply payment to loan schedules
             $this->applyPaymentToLoan($loan, $validated['amount']);
             DB::commit();
@@ -104,6 +119,7 @@ class PaymentController extends Controller
                 'message' => $e->getMessage(),
                 'line' => $e->getLine(),
                 'file' => $e->getFile(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $this->handleError($e, '⚠️ Failed to record cash payment.');
@@ -283,6 +299,7 @@ class PaymentController extends Controller
             'message' => $e->getMessage(),
             'file' => $e->getFile(),
             'line' => $e->getLine(),
+            'trace' => $e->getTraceAsString(),
         ]);
 
         return redirect()->back()->with('error', $msg);
