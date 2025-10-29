@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Log;
 
 // ===============================================================
 // ✅ ADMIN CONTROLLERS (in app/Http/Controllers/Admin)
@@ -25,8 +24,6 @@ use App\Http\Controllers\ActivityController;
 /*
 |--------------------------------------------------------------------------
 | Web Routes
-|--------------------------------------------------------------------------
-| All routes require authentication — no public access.
 |--------------------------------------------------------------------------
 */
 
@@ -79,61 +76,31 @@ Route::middleware(['auth'])->group(function () {
 
         // 🏠 Dashboard
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('admin.dashboard');
-
-        // 📊 Chart Data (for Dashboard Graph)
-        Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])
-            ->name('admin.dashboard.loansByYear');
+        Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('admin.dashboard.loansByYear');
 
         // 👥 Customers
         Route::get('/customers/search', [CustomerController::class, 'search'])->name('admin.customers.search');
-        Route::post('/customers/{id}/toggle', [CustomerController::class, 'toggleStatus'])->name('admin.customers.toggleStatus');
-        Route::post('/customers/{id}/suspend', [CustomerController::class, 'suspend'])->name('admin.customers.suspend');
         Route::resource('customers', CustomerController::class)->names('admin.customers');
 
         // 💰 Loans
         Route::resource('loans', LoanController::class)->names('admin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('admin.loans.activate');
 
-        // 💵 Record Cash Payment (✅ moved to PaymentController)
-        Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('admin.loans.recordPayment');
-
         // 💵 Payments
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('admin.payments.store');
-        Route::post('/loans/{loan}/payment', [PaymentController::class, 'store'])->name('admin.loans.payment');
+        Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('admin.loans.recordPayment');
 
-        // 🧾 View or Download Individual Payment Receipt (PDF)
-        Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])
-            ->name('admin.loans.viewReceipt');
+        // 🧾 Receipts
+        Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])->name('admin.loans.viewReceipt');
 
-        // 🔗 Customer → Loan view
-        Route::get('/customers/{customer}/loans', [LoanController::class, 'customerLoans'])->name('admin.customers.loans');
-        Route::get('/loans-by-year', [LoanController::class, 'getLoansByYear'])->name('admin.loans.byYear');
-
-        // 📊 Reports
-        Route::get('/reports', [ReportsController::class, 'index'])->name('admin.reports.index');
-        Route::get('/reports/{loan}', [ReportsController::class, 'show'])->name('admin.reports.show');
-        Route::post('/reports/{loan}/send-agreement', [ReportsController::class, 'sendAgreement'])->name('admin.reports.sendAgreement');
-        Route::get('/reports/{loan}/send-agreement', fn() => redirect()->route('admin.reports.index'));
-        Route::delete('/reports/failures/clear', [ReportsController::class, 'clearEmailFailures'])->name('admin.reports.clearFailures');
-
-        // ⚙️ Settings
+        // ⚙️ Settings / System
         Route::get('/settings', [SettingsController::class, 'index'])->name('admin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('admin.settings.update');
-        Route::put('/settings/reset', [SettingsController::class, 'reset'])->name('admin.settings.reset');
 
-        // ⚙️ System Control
         Route::get('/system', [SystemController::class, 'index'])->name('admin.system.index');
-        Route::post('/system/reset', [SystemController::class, 'resetData'])->name('admin.system.reset');
         Route::post('/system/backup', [SystemController::class, 'backupData'])->name('admin.system.backup');
-        Route::post('/system/restore', [SystemController::class, 'restoreData'])->name('admin.system.restore');
-        Route::get('/system/backups', [SystemController::class, 'listBackups'])->name('admin.system.listBackups');
-        Route::get('/system/download/{file}', [SystemController::class, 'downloadBackup'])->where('file', '.*')->name('admin.system.download');
-        Route::post('/system/upload', [SystemController::class, 'uploadBackup'])->name('admin.system.upload');
-        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('admin.system.previewReset');
-        Route::delete('/system/delete/{file}', [SystemController::class, 'deleteBackup'])->name('admin.system.deleteBackup');
-        Route::get('/system/refresh', [SystemController::class, 'refreshBackups'])->name('admin.system.refreshBackups');
 
-        // 💳 Paystack Integration (Admin via PaymentController)
+        // 💳 Paystack Integration
         Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('admin.paystack.initialize');
         Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('admin.paystack.callback');
     });
@@ -145,64 +112,32 @@ Route::middleware(['auth'])->group(function () {
 
         // 🏠 Dashboard
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('superadmin.dashboard');
+        Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('superadmin.dashboard.loansByYear');
 
-        // 📊 Chart Data (for Dashboard Graph)
-        Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])
-            ->name('superadmin.dashboard.loansByYear');
-
-        // 👥 Manage Users
+        // 👥 Users & Customers
         Route::resource('users', UserController::class)->names('superadmin.users');
-        Route::post('/users/{user}/resend', [UserController::class, 'resendCredentials'])->name('superadmin.users.resend');
-
-        // 👥 Customers
         Route::get('/customers/search', [CustomerController::class, 'search'])->name('superadmin.customers.search');
-        Route::post('/customers/{id}/toggle', [CustomerController::class, 'toggleStatus'])->name('superadmin.customers.toggleStatus');
-        Route::post('/customers/{id}/suspend', [CustomerController::class, 'suspend'])->name('superadmin.customers.suspend');
         Route::resource('customers', CustomerController::class)->names('superadmin.customers');
 
         // 💰 Loans
         Route::resource('loans', LoanController::class)->names('superadmin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('superadmin.loans.activate');
 
-        // 💵 Record Cash Payment (✅ moved to PaymentController)
-        Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('superadmin.loans.recordPayment');
-
         // 💵 Payments
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('superadmin.payments.store');
-        Route::post('/loans/{loan}/payment', [PaymentController::class, 'store'])->name('superadmin.loans.payment');
+        Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('superadmin.loans.recordPayment');
 
-        // 🧾 View or Download Individual Payment Receipt (PDF)
-        Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])
-            ->name('superadmin.loans.viewReceipt');
+        // 🧾 Receipts
+        Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])->name('superadmin.loans.viewReceipt');
 
-        // 🔗 Customer → Loan view
-        Route::get('/customers/{customer}/loans', [LoanController::class, 'customerLoans'])->name('superadmin.customers.loans');
-        Route::get('/loans-by-year', [LoanController::class, 'getLoansByYear'])->name('superadmin.loans.byYear');
-
-        // 📊 Reports
-        Route::get('/reports', [ReportsController::class, 'index'])->name('superadmin.reports.index');
-        Route::get('/reports/{loan}', [ReportsController::class, 'show'])->name('superadmin.reports.show');
-        Route::post('/reports/{loan}/send-agreement', [ReportsController::class, 'sendAgreement'])->name('superadmin.reports.sendAgreement');
-        Route::get('/reports/{loan}/send-agreement', fn() => redirect()->route('superadmin.reports.index'));
-        Route::delete('/reports/failures/clear', [ReportsController::class, 'clearEmailFailures'])->name('superadmin.reports.clearFailures');
-
-        // ⚙️ Settings & System
+        // ⚙️ Settings / System
         Route::get('/settings', [SettingsController::class, 'index'])->name('superadmin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('superadmin.settings.update');
-        Route::put('/settings/reset', [SettingsController::class, 'reset'])->name('superadmin.settings.reset');
 
         Route::get('/system', [SystemController::class, 'index'])->name('superadmin.system.index');
-        Route::post('/system/reset', [SystemController::class, 'resetData'])->name('superadmin.system.reset');
         Route::post('/system/backup', [SystemController::class, 'backupData'])->name('superadmin.system.backup');
-        Route::post('/system/restore', [SystemController::class, 'restoreData'])->name('superadmin.system.restore');
-        Route::get('/system/backups', [SystemController::class, 'listBackups'])->name('superadmin.system.listBackups');
-        Route::get('/system/download/{file}', [SystemController::class, 'downloadBackup'])->where('file', '.*')->name('superadmin.system.download');
-        Route::post('/system/upload', [SystemController::class, 'uploadBackup'])->name('superadmin.system.upload');
-        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('superadmin.system.previewReset');
-        Route::delete('/system/delete/{file}', [SystemController::class, 'deleteBackup'])->name('superadmin.system.deleteBackup');
-        Route::get('/system/refresh', [SystemController::class, 'refreshBackups'])->name('superadmin.system.refreshBackups');
 
-        // 💳 Paystack Integration (Superadmin via PaymentController)
+        // 💳 Paystack Integration
         Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('superadmin.paystack.initialize');
         Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('superadmin.paystack.callback');
 
@@ -220,24 +155,13 @@ Route::middleware(['auth'])->group(function () {
 });
 
 /* ========================================================================
+   🔍 CSRF CHECK (for debugging)
+   ======================================================================== */
+Route::get('/csrf-check', function () {
+    return response()->json(['csrf' => csrf_token()]);
+});
+
+/* ========================================================================
    🔐 AUTH ROUTES (login / logout)
    ======================================================================== */
 require __DIR__ . '/auth.php';
-
-/* ========================================================================
-   🧩 TEMPORARY: CSRF Debug Route (Remove after test)
-   ======================================================================== */
-Route::post('/csrf-check', function (\Illuminate\Http\Request $request) {
-    Log::info('🔍 CSRF Debug', [
-        'token_from_form' => $request->_token,
-        'session_token'   => $request->session()->token(),
-        'headers'         => $request->headers->all(),
-    ]);
-
-    return response()->json([
-        'token_from_form' => $request->_token,
-        'session_token'   => $request->session()->token(),
-        'session_id'      => session()->getId(),
-        'cookies'         => request()->cookies->all(),
-    ]);
-});
