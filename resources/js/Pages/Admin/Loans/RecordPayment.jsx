@@ -6,7 +6,6 @@ import { toast, Toaster } from "react-hot-toast";
 export default function RecordPayment() {
     const { loan, expectedAmount, auth, flash, basePath } = usePage().props;
 
-    // Include loan_id explicitly
     const { data, setData, post, processing, errors } = useForm({
         loan_id: loan?.id || "",
         amount: expectedAmount || "",
@@ -21,15 +20,16 @@ export default function RecordPayment() {
     const submit = (e) => {
         e.preventDefault();
 
-        // Explicitly send loan_id and data
-        post(route(`${basePath}.loans.recordPayment`, loan.id), {
+        // ✅ Force correct absolute route path (bypass Inertia’s route confusion)
+        post(`/${basePath}/loans/${loan.id}/record-payment`, {
             preserveScroll: true,
-            onSuccess: () => toast.success("✅ Payment recorded successfully!"),
-            onError: (errors) => {
-                console.error("Payment failed:", errors);
-                toast.error(
-                    "⚠️ Failed to record payment. Check console for details.",
-                );
+            onSuccess: () => {
+                toast.success("✅ Cash payment recorded successfully!");
+                setData("note", "");
+            },
+            onError: (err) => {
+                console.error("❌ Payment error:", err);
+                toast.error("⚠️ Failed to record payment. Please try again.");
             },
         });
     };
@@ -47,7 +47,7 @@ export default function RecordPayment() {
 
             <div className="max-w-2xl mx-auto bg-white shadow-md rounded-lg p-6 space-y-6">
                 <Link
-                    href={route(`${basePath}.loans.show`, loan.id)}
+                    href={`/${basePath}/loans/${loan.id}`}
                     className="text-sm text-gray-500 hover:text-indigo-600"
                 >
                     ← Back to Loan Details
