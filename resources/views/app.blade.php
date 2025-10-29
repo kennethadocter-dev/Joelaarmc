@@ -11,20 +11,20 @@
 
         <!-- ✅ Favicon -->
         <link rel="icon" type="image/png" href="{{ asset('images/logo.png') }}">
-        <!-- You can also include a .ico fallback if you want -->
+        <!-- Optional ICO fallback -->
         <!-- <link rel="icon" href="{{ asset('favicon.ico') }}" type="image/x-icon"> -->
 
-        <!-- Fonts -->
+        <!-- ✅ Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
 
-        <!-- Scripts -->
+        <!-- ✅ Scripts -->
         @routes
         @viteReactRefresh
         @vite(['resources/js/app.jsx', "resources/js/Pages/{$page['component']}.jsx"])
         @inertiaHead
     </head>
-    <body class="font-sans antialiased">
+    <body class="font-sans antialiased bg-gray-50 text-gray-900">
         @inertia
     </body>
 </html>
