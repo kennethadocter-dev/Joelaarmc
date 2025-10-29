@@ -9,12 +9,9 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
-use App\Mail\LoanCompletedMail;
 use App\Helpers\ActivityLogger;
 use App\Helpers\SmsNotifier;
-use PDF;
 
 class PaymentController extends Controller
 {
@@ -56,7 +53,7 @@ class PaymentController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load payment list.');
+            return $this->showDebugError($e, '⚠️ Failed to load payment list.');
         }
     }
 
@@ -114,19 +111,11 @@ class PaymentController extends Controller
                 ->with('success', '✅ Cash payment recorded successfully!');
         } catch (\Throwable $e) {
             DB::rollBack();
-
-            Log::error('❌ Cash Payment Error', [
-                'message' => $e->getMessage(),
-                'line' => $e->getLine(),
-                'file' => $e->getFile(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return $this->handleError($e, '⚠️ Failed to record cash payment.');
+            return $this->showDebugError($e, '⚠️ Failed to record cash payment.');
         }
     }
 
-    /** 💳 Initialize Paystack Payment (for future online payments) */
+    /** 💳 Initialize Paystack Payment (for future use) */
     public function initialize(Request $request)
     {
         try {
@@ -150,18 +139,21 @@ class PaymentController extends Controller
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
                 'Content-Type'  => 'application/json',
-            ])->post(env('PAYSTACK_PAYMENT_URL', 'https://api.paystack.co') . '/transaction/initialize', [
-                'email'        => $validated['email'],
-                'amount'       => $amountInKobo,
-                'callback_url' => $callbackUrl,
-                'metadata'     => [
-                    'loan_id' => $validated['loan_id'] ?? null,
-                    'initiated_by' => auth()->user()?->name ?? 'System',
-                    'method' => $validated['method'] ?? 'paystack',
-                    'environment' => app()->environment(),
-                    'app_url' => config('app.url'),
-                ],
-            ]);
+            ])->post(
+                env('PAYSTACK_PAYMENT_URL', 'https://api.paystack.co') . '/transaction/initialize',
+                [
+                    'email'        => $validated['email'],
+                    'amount'       => $amountInKobo,
+                    'callback_url' => $callbackUrl,
+                    'metadata'     => [
+                        'loan_id' => $validated['loan_id'] ?? null,
+                        'initiated_by' => auth()->user()?->name ?? 'System',
+                        'method' => $validated['method'] ?? 'paystack',
+                        'environment' => app()->environment(),
+                        'app_url' => config('app.url'),
+                    ],
+                ]
+            );
 
             $data = $response->json();
 
@@ -175,8 +167,7 @@ class PaymentController extends Controller
             Log::warning('⚠️ Paystack initialization failed', ['response' => $data]);
             return response()->json(['error' => 'Unable to initialize Paystack payment.'], 422);
         } catch (\Throwable $e) {
-            Log::error('❌ Paystack init error', ['msg' => $e->getMessage()]);
-            return response()->json(['error' => $e->getMessage()], 500);
+            return $this->showDebugError($e, '⚠️ Paystack init failed.');
         }
     }
 
@@ -242,7 +233,7 @@ class PaymentController extends Controller
                 ->with('success', "✅ Payment of ₵{$amount} received via Paystack!");
         } catch (\Throwable $e) {
             DB::rollBack();
-            return $this->handleError($e, '⚠️ Error processing Paystack payment.');
+            return $this->showDebugError($e, '⚠️ Error processing Paystack payment.');
         }
     }
 
@@ -275,25 +266,10 @@ class PaymentController extends Controller
         $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
         $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
         $loan->save();
-
-        if ($loan->status === 'paid') {
-            $interestEarned = ($loan->amount * $loan->interest_rate / 100);
-            $loan->interest_earned = $interestEarned;
-            $loan->save();
-
-            ActivityLogger::log('Completed Loan', "Loan #{$loan->id} fully paid. Interest earned: ₵{$interestEarned}");
-
-            if ($loan->customer?->phone) {
-                $msg = "🎉 Hi {$loan->customer->full_name}, your loan of ₵" .
-                    number_format($loan->amount, 2) .
-                    " is now fully paid. Thank you for being a valued customer!";
-                SmsNotifier::send($loan->customer->phone, $msg);
-            }
-        }
     }
 
-    /** ⚠️ Handle errors gracefully */
-    private function handleError(\Throwable $e, string $msg)
+    /** ⚠️ Show error details (temporary debug) */
+    private function showDebugError(\Throwable $e, string $msg)
     {
         Log::error('❌ PaymentController', [
             'message' => $e->getMessage(),
@@ -302,6 +278,11 @@ class PaymentController extends Controller
             'trace' => $e->getTraceAsString(),
         ]);
 
-        return redirect()->back()->with('error', $msg);
+        // 👇 Return visible error page for debugging
+        return response()->make("
+            <h2 style='color:red'>⚠️ $msg</h2>
+            <p><strong>{$e->getMessage()}</strong></p>
+            <pre>{$e->getTraceAsString()}</pre>
+        ", 500);
     }
 }
