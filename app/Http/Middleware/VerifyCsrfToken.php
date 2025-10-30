@@ -16,19 +16,22 @@ class VerifyCsrfToken extends Middleware
     /**
      * The URIs that should be excluded from CSRF verification.
      *
-     * You can add API routes or webhook endpoints here if needed.
-     *
      * @var array<int, string>
      */
     protected $except = [
-        // ✅ Allow CSRF check endpoint for debugging only
-        '/csrf-check',
-
-        // ✅ Allow Paystack webhooks or callbacks if used
+        // ✅ Payment-related routes
+        'admin/payments/store',
+        'admin/loans/*/record-payment',
         'admin/paystack/*',
+
+        'superadmin/payments/store',
+        'superadmin/loans/*/record-payment',
         'superadmin/paystack/*',
 
-        // (Optional) If you ever expose APIs, add them here
-        // 'api/*',
+        // ✅ API endpoints that may post from external clients
+        'api/*',
+
+        // ✅ Optional health-check or system routes
+        'system/*',
     ];
 }
