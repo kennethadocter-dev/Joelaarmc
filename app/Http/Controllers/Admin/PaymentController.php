@@ -63,10 +63,10 @@ class PaymentController extends Controller
         try {
             Log::info('🧾 Payment Debug Start', [
                 'incoming_data' => $request->all(),
-                'route_params' => $request->route()->parameters(),
-                'user_id' => auth()->id(),
-                'env' => app()->environment(),
-                'url' => config('app.url'),
+                'route_params'  => $request->route()->parameters(),
+                'user_id'       => auth()->id(),
+                'env'           => app()->environment(),
+                'url'           => config('app.url'),
             ]);
 
             // ✅ Handle both /loans/{loan}/record-payment and /payments/store
@@ -112,14 +112,14 @@ class PaymentController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
 
-            \Log::error('❌ Cash Payment Error', [
+            Log::error('❌ Cash Payment Error', [
                 'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-        ]);
-            return back()->with('error', '⚠️ Payment failed: ' . $e->getMessage());
+                'trace'   => $e->getTraceAsString(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+            ]);
 
+            return back()->with('error', '⚠️ Payment failed: ' . $e->getMessage());
         }
     }
 
@@ -154,11 +154,11 @@ class PaymentController extends Controller
                     'amount'       => $amountInKobo,
                     'callback_url' => $callbackUrl,
                     'metadata'     => [
-                        'loan_id' => $validated['loan_id'] ?? null,
+                        'loan_id'      => $validated['loan_id'] ?? null,
                         'initiated_by' => auth()->user()?->name ?? 'System',
-                        'method' => $validated['method'] ?? 'paystack',
-                        'environment' => app()->environment(),
-                        'app_url' => config('app.url'),
+                        'method'       => $validated['method'] ?? 'paystack',
+                        'environment'  => app()->environment(),
+                        'app_url'      => config('app.url'),
                     ],
                 ]
             );
@@ -168,7 +168,7 @@ class PaymentController extends Controller
             if (isset($data['status']) && $data['status'] === true && isset($data['data']['authorization_url'])) {
                 return response()->json([
                     'redirect_url' => $data['data']['authorization_url'],
-                    'data' => $data['data']
+                    'data' => $data['data'],
                 ]);
             }
 
@@ -200,9 +200,9 @@ class PaymentController extends Controller
                     ->with('error', 'Payment verification failed.');
             }
 
-            $details = $data['data'];
-            $loanId  = $details['metadata']['loan_id'] ?? null;
-            $amount  = $details['amount'] / 100;
+            $details   = $data['data'];
+            $loanId    = $details['metadata']['loan_id'] ?? null;
+            $amount    = $details['amount'] / 100;
             $reference = $details['reference'];
 
             if (!$loanId) {
@@ -220,13 +220,13 @@ class PaymentController extends Controller
 
             if (!Payment::where('reference', $reference)->exists()) {
                 Payment::create([
-                    'loan_id' => $loan->id,
-                    'received_by' => auth()->id() ?? 1,
-                    'amount' => $amount,
-                    'paid_at' => now(),
+                    'loan_id'        => $loan->id,
+                    'received_by'    => auth()->id() ?? 1,
+                    'amount'         => $amount,
+                    'paid_at'        => now(),
                     'payment_method' => 'paystack',
-                    'reference' => $reference,
-                    'note' => 'Paid via Paystack',
+                    'reference'      => $reference,
+                    'note'           => 'Paid via Paystack',
                 ]);
 
                 $this->applyPaymentToLoan($loan, $amount);
@@ -265,14 +265,14 @@ class PaymentController extends Controller
             }
 
             $s->amount_left = max(0, $s->amount - $s->amount_paid);
-            $s->is_paid = $s->amount_left <= 0.01;
-            $s->note = $s->is_paid ? 'Fully paid' : 'Partially paid';
+            $s->is_paid     = $s->amount_left <= 0.01;
+            $s->note        = $s->is_paid ? 'Fully paid' : 'Partially paid';
             $s->save();
         }
 
-        $loan->amount_paid = $loan->loanSchedules()->sum('amount_paid');
+        $loan->amount_paid      = $loan->loanSchedules()->sum('amount_paid');
         $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
-        $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
+        $loan->status           = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
         $loan->save();
     }
 
@@ -281,9 +281,9 @@ class PaymentController extends Controller
     {
         Log::error('❌ PaymentController', [
             'message' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'trace' => $e->getTraceAsString(),
+            'file'    => $e->getFile(),
+            'line'    => $e->getLine(),
+            'trace'   => $e->getTraceAsString(),
         ]);
 
         // 👇 Return visible error page for debugging
