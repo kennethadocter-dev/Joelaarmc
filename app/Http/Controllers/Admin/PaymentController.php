@@ -113,12 +113,13 @@ class PaymentController extends Controller
             DB::rollBack();
 
             \Log::error('❌ Cash Payment Error', [
-        'error_message' => $e->getMessage(),
-        'trace' => $e->getTraceAsString(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine(),
-    ]);
-            return $this->showDebugError($e, '⚠️ Failed to record cash payment.');
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+        ]);
+            return back()->with('error', '⚠️ Payment failed: ' . $e->getMessage());
+
         }
     }
 
