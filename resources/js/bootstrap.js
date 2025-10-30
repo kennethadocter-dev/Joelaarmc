@@ -7,21 +7,18 @@
  */
 
 import axios from "axios";
-
 window.axios = axios;
 
-// ✅ Always mark requests as XHR (Laravel checks this)
+window.axios.defaults.withCredentials = true;
 window.axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
-// ✅ Include CSRF token from <meta> tag for all requests
+// ✅ Automatically include CSRF token
 const token = document.querySelector('meta[name="csrf-token"]');
 if (token) {
     window.axios.defaults.headers.common["X-CSRF-TOKEN"] = token.content;
     console.log("✅ CSRF token loaded successfully into Axios headers");
 } else {
-    console.warn(
-        "⚠️ CSRF token not found in document meta tag. Some POST requests may fail.",
-    );
+    console.error("⚠️ No CSRF token found in <meta> tag!");
 }
 
 // Optional: enable cookies (needed for cross-domain requests, if any)
