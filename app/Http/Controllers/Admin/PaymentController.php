@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use App\Helpers\ActivityLogger;
-use App\Helpers\SmsNotifier;
 
 class PaymentController extends Controller
 {
@@ -57,7 +56,34 @@ class PaymentController extends Controller
         }
     }
 
-    /** 💵 Store cash payment from loan show */
+    /** 🆕 Show "Record Cash Payment" page (Full page) */
+    public function create(Request $request)
+    {
+        try {
+            $loanId = $request->query('loan_id');
+            if (!$loanId) {
+                return redirect()->back()->with('error', 'Missing loan ID.');
+            }
+
+            $loan = Loan::with('customer')->findOrFail($loanId);
+
+            return Inertia::render('Admin/Payments/RecordPayment', [
+                'loan' => $loan,
+                'expectedAmount' => $loan->amount_remaining ?? 0,
+                'redirect' => $request->query('redirect'), // ✅ keep redirect target
+                'auth' => ['user' => auth()->user()],
+                'basePath' => $this->basePath(),
+                'flash' => [
+                    'success' => session('success'),
+                    'error' => session('error'),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->showDebugError($e, '⚠️ Unable to load Cash Payment page.');
+        }
+    }
+
+    /** 💵 Store cash payment and redirect back */
     public function store(Request $request)
     {
         try {
@@ -66,10 +92,9 @@ class PaymentController extends Controller
                 'route_params'  => $request->route()->parameters(),
                 'user_id'       => auth()->id(),
                 'env'           => app()->environment(),
-                'url'           => config('app.url'),
             ]);
 
-            // ✅ Handle both /loans/{loan}/record-payment and /payments/store
+            // ✅ Support both /loans/{loan}/record-payment and /payments/store
             if (!$request->has('loan_id') && $request->route('loan')) {
                 $request->merge(['loan_id' => $request->route('loan')]);
             }
@@ -83,11 +108,9 @@ class PaymentController extends Controller
             DB::beginTransaction();
 
             $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
-
-            // ✅ Fallback user ID in case auth()->id() is null (Render session loss)
             $userId = auth()->id() ?? 1;
 
-            // 💾 Create Payment record
+            // 💾 Create payment
             $payment = Payment::create([
                 'loan_id'        => $loan->id,
                 'received_by'    => $userId,
@@ -106,6 +129,14 @@ class PaymentController extends Controller
 
             ActivityLogger::log('Cash Payment', "₵{$validated['amount']} recorded for Loan #{$loan->id}");
 
+            // ✅ Handle redirect back to loan page (if provided)
+            $redirectUrl = $request->input('redirect');
+            if ($redirectUrl) {
+                Log::info('🔁 Redirecting to provided URL', ['redirect' => $redirectUrl]);
+                return redirect($redirectUrl)->with('success', '✅ Cash payment recorded successfully!');
+            }
+
+            // fallback if no redirect param
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
                 ->with('success', '✅ Cash payment recorded successfully!');
@@ -123,7 +154,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 💳 Initialize Paystack Payment (for future use) */
+    /** 💳 Initialize Paystack Payment */
     public function initialize(Request $request)
     {
         try {
@@ -276,7 +307,7 @@ class PaymentController extends Controller
         $loan->save();
     }
 
-    /** ⚠️ Show error details (temporary debug) */
+    /** ⚠️ Show error details */
     private function showDebugError(\Throwable $e, string $msg)
     {
         Log::error('❌ PaymentController', [
@@ -286,7 +317,6 @@ class PaymentController extends Controller
             'trace'   => $e->getTraceAsString(),
         ]);
 
-        // 👇 Return visible error page for debugging
         return response()->make("
             <h2 style='color:red'>⚠️ $msg</h2>
             <p><strong>{$e->getMessage()}</strong></p>

@@ -2,6 +2,12 @@
 
 use Illuminate\Support\Facades\Route;
 
+/*
+|--------------------------------------------------------------------------
+| Import Controllers
+|--------------------------------------------------------------------------
+*/
+
 // ===============================================================
 // ✅ ADMIN CONTROLLERS (in app/Http/Controllers/Admin)
 // ===============================================================
@@ -86,7 +92,8 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('loans', LoanController::class)->names('admin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('admin.loans.activate');
 
-        // 💵 Payments
+        // 💵 Payments (Full-page Record Payment)
+        Route::get('/payments/create', [PaymentController::class, 'create'])->name('admin.payments.create');
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('admin.payments.store');
         Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('admin.loans.recordPayment');
 
@@ -96,7 +103,6 @@ Route::middleware(['auth'])->group(function () {
         // ⚙️ Settings / System
         Route::get('/settings', [SettingsController::class, 'index'])->name('admin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('admin.settings.update');
-
         Route::get('/system', [SystemController::class, 'index'])->name('admin.system.index');
         Route::post('/system/backup', [SystemController::class, 'backupData'])->name('admin.system.backup');
 
@@ -123,7 +129,8 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('loans', LoanController::class)->names('superadmin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('superadmin.loans.activate');
 
-        // 💵 Payments
+        // 💵 Payments (Full-page Record Payment)
+        Route::get('/payments/create', [PaymentController::class, 'create'])->name('superadmin.payments.create');
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('superadmin.payments.store');
         Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('superadmin.loans.recordPayment');
 
@@ -133,7 +140,6 @@ Route::middleware(['auth'])->group(function () {
         // ⚙️ Settings / System
         Route::get('/settings', [SettingsController::class, 'index'])->name('superadmin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('superadmin.settings.update');
-
         Route::get('/system', [SystemController::class, 'index'])->name('superadmin.system.index');
         Route::post('/system/backup', [SystemController::class, 'backupData'])->name('superadmin.system.backup');
 
@@ -157,9 +163,7 @@ Route::middleware(['auth'])->group(function () {
 /* ========================================================================
    🔍 CSRF CHECK (for debugging)
    ======================================================================== */
-Route::get('/csrf-check', function () {
-    return response()->json(['csrf' => csrf_token()]);
-});
+Route::get('/csrf-check', fn() => response()->json(['csrf' => csrf_token()]));
 
 /* ========================================================================
    🔐 AUTH ROUTES (login / logout)

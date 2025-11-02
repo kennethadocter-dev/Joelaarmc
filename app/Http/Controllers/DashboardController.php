@@ -107,22 +107,15 @@ class DashboardController extends Controller
                     ->with('error', '⚠️ Your customer record could not be found. Please contact support.');
             }
 
-            // 🔹 All loans for this customer
             $loans = $customer->loans ?? collect();
 
-            // 🔸 Active or latest loan
             $activeLoan = $loans->whereIn('status', ['active', 'overdue'])->first()
                 ?: $loans->sortByDesc('created_at')->first();
 
-            // 💰 Total loan with interest
-            if ($activeLoan) {
-                $multiplier = $this->getInterestMultiplier($activeLoan);
-                $totalWithInterest = round($activeLoan->amount * $multiplier, 2);
-            } else {
-                $totalWithInterest = 0;
-            }
+            $totalWithInterest = $activeLoan
+                ? round($activeLoan->amount * $this->getInterestMultiplier($activeLoan), 2)
+                : 0;
 
-            // 💸 Amount paid
             $amountPaid = $activeLoan
                 ? DB::table('payments')->where('loan_id', $activeLoan->id)->sum('amount')
                 : 0;
@@ -132,12 +125,10 @@ class DashboardController extends Controller
                 ? round(($activeLoan->amount + ($activeLoan->amount * $interestRate / 100)) - abs($amountPaid ?? 0), 2)
                 : 0;
 
-            // 🕓 Last payment
             $lastPayment = $activeLoan
                 ? Payment::where('loan_id', $activeLoan->id)->latest('paid_at')->first(['amount', 'paid_at', 'reference'])
                 : null;
 
-            // 📅 Next payment info
             $nextDueDate = $activeLoan?->due_date ? Carbon::parse($activeLoan->due_date) : null;
             $termMonths = $activeLoan?->term_months ?? 1;
             $nextPaymentAmount = $activeLoan
@@ -145,12 +136,10 @@ class DashboardController extends Controller
                 : 0;
             $daysRemaining = $nextDueDate ? now()->diffInDays($nextDueDate, false) : null;
 
-            // 💳 Payment history
             $payments = $activeLoan
                 ? Payment::where('loan_id', $activeLoan->id)->latest()->take(10)->get(['id', 'amount', 'paid_at', 'reference'])
                 : collect();
 
-            // 📜 Loan history
             $loanHistory = $loans
                 ->sortByDesc('created_at')
                 ->map(function ($loan) {
@@ -184,11 +173,9 @@ class DashboardController extends Controller
                 'lastPayment' => $lastPayment,
             ]);
         } catch (\Throwable $e) {
-            $user = Auth::user();
-
             Log::error('❌ Dashboard load failed', [
-                'user' => $user?->email,
-                'role' => $user?->role,
+                'user' => Auth::user()?->email,
+                'role' => Auth::user()?->role,
                 'error' => $e->getMessage(),
             ]);
 
@@ -209,7 +196,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * 📊 Chart API - Loans per month
+     * 📊 Chart API - Loans per month (PostgreSQL safe)
      */
     public function getLoansByYear()
     {
@@ -217,14 +204,21 @@ class DashboardController extends Controller
             $year = request('year', now()->year);
             $connection = config('database.default');
 
-            // Detect SQL syntax based on DB driver
-            if ($connection === 'sqlite') {
-                $rows = Loan::selectRaw("strftime('%m', created_at) as month_key, COUNT(*) as cnt")
+            if ($connection === 'pgsql') {
+                // ✅ PostgreSQL syntax
+                $rows = Loan::selectRaw("EXTRACT(MONTH FROM created_at) AS month_key, COUNT(*) AS cnt")
+                    ->whereRaw("EXTRACT(YEAR FROM created_at) = ?", [$year])
+                    ->groupBy('month_key')
+                    ->pluck('cnt', 'month_key');
+            } elseif ($connection === 'sqlite') {
+                // ✅ SQLite syntax
+                $rows = Loan::selectRaw("strftime('%m', created_at) AS month_key, COUNT(*) AS cnt")
                     ->whereRaw("strftime('%Y', created_at) = ?", [$year])
                     ->groupBy('month_key')
                     ->pluck('cnt', 'month_key');
             } else {
-                $rows = Loan::selectRaw("MONTH(created_at) as month_key, COUNT(*) as cnt")
+                // ✅ MySQL fallback
+                $rows = Loan::selectRaw("MONTH(created_at) AS month_key, COUNT(*) AS cnt")
                     ->whereYear('created_at', $year)
                     ->groupBy('month_key')
                     ->pluck('cnt', 'month_key');
@@ -232,7 +226,7 @@ class DashboardController extends Controller
 
             $result = [];
             for ($m = 1; $m <= 12; $m++) {
-                $key = str_pad((string)$m, 2, '0', STR_PAD_LEFT);
+                $key = str_pad((string) $m, 2, '0', STR_PAD_LEFT);
                 $result[$key] = (int) ($rows[$key] ?? 0);
             }
 

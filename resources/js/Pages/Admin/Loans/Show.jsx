@@ -1,6 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, Link, router, usePage } from "@inertiajs/react";
-import { useState, useEffect } from "react";
+import { Head, Link, usePage } from "@inertiajs/react";
+import { useEffect } from "react";
 import { toast, Toaster } from "react-hot-toast";
 
 export default function LoanShow() {
@@ -13,11 +13,9 @@ export default function LoanShow() {
     } = usePage().props;
 
     const user = auth?.user || {};
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [amount, setAmount] = useState("");
-    const [note, setNote] = useState("");
 
     useEffect(() => {
+        // ✅ show flash messages (from Record Payment redirect)
         if (flash?.success) toast.success(flash.success);
         if (flash?.error) toast.error(flash.error);
     }, [flash]);
@@ -47,55 +45,13 @@ export default function LoanShow() {
         }
     };
 
-    /** 💵 Record Cash Payment */
-    const submitPayment = (e) => {
-        e.preventDefault();
-        if (!amount || isNaN(amount) || Number(amount) <= 0) {
-            toast.error("Please enter a valid payment amount.");
-            return;
-        }
-
-        router.post(
-            route(`${basePath}.payments.store`),
-            {
-                loan_id: loan.id,
-                amount,
-                received_by: user.name,
-                note,
-            },
-            {
-                onStart: () => toast.loading("💾 Recording payment..."),
-                onFinish: () => toast.dismiss(),
-                onSuccess: () => {
-                    toast.success("✅ Cash payment recorded successfully!");
-                    setShowPaymentModal(false);
-                    setAmount("");
-                    setNote("");
-                    router.reload({
-                        only: ["loan", "loanSchedules", "auth"],
-                        preserveScroll: true,
-                        onFinish: () => {
-                            setTimeout(() => {
-                                document
-                                    .getElementById("payment-schedule")
-                                    ?.scrollIntoView({ behavior: "smooth" });
-                            }, 700);
-                        },
-                    });
-                },
-            },
-        );
-    };
-
     /** 💳 Pay with Paystack (only next unpaid schedule) */
     const handlePaystackPayment = async () => {
-        // 🧮 Find next unpaid schedule
         const nextSchedule = loanSchedules.find((s) => !s.is_paid);
         const scheduleAmount = nextSchedule
             ? nextSchedule.amount_left || nextSchedule.amount
             : 0;
 
-        // 🧩 Guards
         if (!nextSchedule) {
             toast.error("All installments are already paid!");
             return;
@@ -123,7 +79,7 @@ export default function LoanShow() {
                     },
                     body: JSON.stringify({
                         email: loan.customer?.email || "noemail@example.com",
-                        amount: scheduleAmount, // ✅ only next unpaid schedule
+                        amount: scheduleAmount,
                         loan_id: loan.id,
                         method: "paystack",
                     }),
@@ -250,17 +206,19 @@ export default function LoanShow() {
 
                 {/* Buttons */}
                 <div className="flex flex-wrap gap-3">
-                    <button
-                        onClick={() => setShowPaymentModal(true)}
+                    <Link
+                        href={`/${basePath}/payments/create?loan_id=${loan.id}&redirect=${encodeURIComponent(
+                            `/${basePath}/loans/${loan.id}`,
+                        )}`}
                         disabled={isFullyPaid}
-                        className={`px-5 py-2 rounded-md font-semibold transition ${
+                        className={`inline-flex items-center justify-center px-5 py-2 rounded-md font-semibold transition ${
                             isFullyPaid
-                                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                ? "bg-gray-300 text-gray-500 cursor-not-allowed pointer-events-none"
                                 : "bg-green-600 text-white hover:bg-green-700"
                         }`}
                     >
                         💵 Record Cash Payment
-                    </button>
+                    </Link>
 
                     <button
                         onClick={handlePaystackPayment}
@@ -458,70 +416,6 @@ export default function LoanShow() {
                     </table>
                 </div>
             </div>
-
-            {/* 💵 Cash Payment Modal */}
-            {showPaymentModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6 space-y-4 animate-fadeIn">
-                        <h3 className="text-lg font-semibold text-gray-800">
-                            💵 Record Cash Payment
-                        </h3>
-                        <form onSubmit={submitPayment} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Received By
-                                </label>
-                                <input
-                                    type="text"
-                                    value={user.name || ""}
-                                    readOnly
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-700"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Amount
-                                </label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    step="0.01"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    placeholder="Enter amount..."
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Note (optional)
-                                </label>
-                                <textarea
-                                    value={note}
-                                    onChange={(e) => setNote(e.target.value)}
-                                    placeholder="Add note..."
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
-                                />
-                            </div>
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPaymentModal(false)}
-                                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md font-semibold hover:bg-gray-300 transition"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition"
-                                >
-                                    Save Payment
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
         </AuthenticatedLayout>
     );
 }
