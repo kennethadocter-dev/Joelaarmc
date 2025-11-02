@@ -1,6 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from "react";
 import Dropdown from "@/Components/Dropdown";
 import { Link, usePage } from "@inertiajs/react";
+import NProgress from "nprogress";
 import {
     FaTachometerAlt,
     FaFileInvoiceDollar,
@@ -14,6 +15,14 @@ import {
     FaChevronLeft,
     FaChevronRight,
 } from "react-icons/fa";
+
+/* ---------- NProgress Setup ---------- */
+NProgress.configure({ showSpinner: false });
+if (typeof window !== "undefined") {
+    document.addEventListener("inertia:start", () => NProgress.start());
+    document.addEventListener("inertia:finish", () => NProgress.done());
+    document.addEventListener("inertia:error", () => NProgress.done());
+}
 
 /* ---------- Global Confirm Modal Context ---------- */
 const ConfirmContext = createContext(null);
@@ -56,8 +65,8 @@ function ConfirmModal({ show, title, message, type, onConfirm, onCancel }) {
 export default function AuthenticatedLayout({ header, children }) {
     const page = usePage();
     const user = page?.props?.auth?.user || {};
-    const can = page?.props?.can || page?.props?.auth?.can || {};
-    const basePath = page?.props?.basePath;
+    const basePath =
+        page?.props?.basePath || (user.is_super_admin ? "superadmin" : "admin");
     const currentUrl =
         page?.url ||
         (typeof window !== "undefined" ? window.location.pathname : "") ||
@@ -73,6 +82,7 @@ export default function AuthenticatedLayout({ header, children }) {
         onConfirm: null,
     });
 
+    /* ---------- Confirm Modal Handler ---------- */
     useEffect(() => {
         window.appConfirm = (title, message, callback, type = "info") => {
             setConfirmState({
@@ -91,7 +101,7 @@ export default function AuthenticatedLayout({ header, children }) {
     const closeConfirm = () =>
         setConfirmState((prev) => ({ ...prev, show: false }));
 
-    if (!user || !user.role || !basePath)
+    if (!user || !user.role)
         return (
             <div className="flex items-center justify-center min-h-screen text-gray-600">
                 Loading dashboard...
@@ -105,7 +115,11 @@ export default function AuthenticatedLayout({ header, children }) {
 
     /* ---------- Sidebar Menu ---------- */
     let menuItems = [
-        { name: "Dashboard", icon: <FaTachometerAlt />, route: "/dashboard" },
+        {
+            name: "Dashboard",
+            icon: <FaTachometerAlt />,
+            route: `/${basePath}/dashboard`,
+        },
         {
             name: "Customers",
             icon: <FaUsers />,
@@ -124,7 +138,7 @@ export default function AuthenticatedLayout({ header, children }) {
         { name: "Settings", icon: <FaCog />, route: `/${basePath}/settings` },
     ];
 
-    if (isAdmin && user.role === "superadmin") {
+    if (user.role === "superadmin") {
         menuItems.push(
             {
                 name: "Activity Log",
@@ -147,9 +161,7 @@ export default function AuthenticatedLayout({ header, children }) {
 
     const avatar = user?.profile_photo_url
         ? user.profile_photo_url
-        : `https://ui-avatars.com/api/?name=${encodeURIComponent(
-              user.name || "U",
-          )}&background=random`;
+        : `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || "User")}&background=random`;
 
     /* ---------- Layout ---------- */
     return (
@@ -217,7 +229,7 @@ export default function AuthenticatedLayout({ header, children }) {
                     </aside>
                 )}
 
-                {/* ---------- MOBILE DRAWER ---------- */}
+                {/* ---------- MOBILE SIDEBAR ---------- */}
                 {isAdmin && mobileSidebar && (
                     <div className="fixed inset-0 z-50 bg-black/50 md:hidden">
                         <aside className="absolute left-0 top-0 h-full w-64 bg-white shadow-lg p-5 overflow-y-auto">
@@ -248,13 +260,13 @@ export default function AuthenticatedLayout({ header, children }) {
                     </div>
                 )}
 
-                {/* ---------- MAIN CONTENT (Scrolls only here) ---------- */}
+                {/* ---------- MAIN CONTENT ---------- */}
                 <div
                     className={`flex flex-col flex-1 min-h-screen transition-all duration-300 ${
                         isAdmin ? (sidebarOpen ? "md:ml-64" : "md:ml-20") : ""
                     }`}
                 >
-                    {/* Sticky Top Navbar */}
+                    {/* Top Navbar */}
                     <nav className="border-b border-gray-200 bg-white fixed top-0 right-0 left-0 md:left-auto z-30">
                         <div className="flex justify-between items-center px-4 sm:px-6 h-16">
                             {isAdmin && (
@@ -300,14 +312,14 @@ export default function AuthenticatedLayout({ header, children }) {
                         </div>
                     </nav>
 
-                    {/* Page Header below topbar */}
+                    {/* Header Section */}
                     {header && (
                         <header className="bg-white shadow-sm px-4 sm:px-6 py-4 mt-16 sticky top-16 z-20">
                             {header}
                         </header>
                     )}
 
-                    {/* Scrollable content area */}
+                    {/* Main Page Content */}
                     <main className="flex-1 overflow-y-auto p-4 sm:p-6 mt-16">
                         {children}
                     </main>
