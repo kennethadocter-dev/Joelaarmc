@@ -1,11 +1,15 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useEffect, useState, useRef } from "react";
+import { route } from "ziggy-js"; // ✅ Correct import
 import { printSection } from "@/utils/printSection";
 import Toast from "@/Components/Toast";
-import ConfirmationModal from "@/Components/ConfirmationModal"; // ✅ New component
+import ConfirmationModal from "@/Components/ConfirmationModal";
 
+// ✅ Currency formatter
 const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
+
+// ✅ Date formatter
 const fmt = (d) =>
     d
         ? new Date(d).toLocaleDateString("en-US", {
@@ -22,14 +26,16 @@ export default function ReportsIndex() {
         filters = {},
         auth = {},
         basePath = "admin",
+        flash = {},
     } = usePage().props;
 
     const user = auth?.user || {};
     const [q, setQ] = useState(filters.q || "");
     const tableRef = useRef(null);
-    const [toast, setToast] = useState({ message: "", type: "success" });
-
-    // 🔹 Modal control
+    const [toast, setToast] = useState({
+        message: flash?.success || flash?.error || "",
+        type: flash?.success ? "success" : flash?.error ? "error" : "success",
+    });
     const [modal, setModal] = useState({
         open: false,
         action: null,
@@ -40,45 +46,41 @@ export default function ReportsIndex() {
         ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
         user?.is_super_admin;
 
+    /* 🔍 Debounced Search */
     useEffect(() => {
+        if (q === "" && !filters.q) return;
         const timeout = setTimeout(() => {
             router.get(
                 route(`${basePath}.reports.index`),
                 { q: q || undefined },
-                {
-                    preserveScroll: true,
-                    preserveState: true,
-                    replace: true,
-                },
+                { preserveScroll: true, preserveState: true, replace: true },
             );
         }, 400);
         return () => clearTimeout(timeout);
     }, [q]);
 
+    /* 🖨 Print */
     const handlePrint = () => {
-        if (tableRef.current) {
-            printSection(
-                tableRef.current,
-                "Loan Reports",
-                "Joelaar Micro-Credit Services",
-            );
-        } else {
-            setToast({
-                message: "⚠️ Table section not found!",
-                type: "error",
-            });
-        }
+        if (!tableRef.current)
+            return setToast({ message: "⚠️ Nothing to print!", type: "error" });
+
+        printSection(
+            tableRef.current,
+            "Loan Reports",
+            "Joelaar Micro-Credit Services",
+        );
     };
 
-    // 🔹 Trigger modal instead of confirm()
-    const openModal = (action, loanId = null) => {
+    /* 🧩 Modal Controls */
+    const openModal = (action, loanId = null) =>
         setModal({ open: true, action, loanId });
-    };
+    const closeModal = () =>
+        setModal({ open: false, action: null, loanId: null });
 
-    // 🔹 Confirm modal action
+    /* 🔁 Confirm Modal Action */
     const confirmModalAction = () => {
         const { action, loanId } = modal;
-        setModal({ open: false, action: null, loanId: null });
+        closeModal();
 
         if (action === "retry") {
             router.post(
@@ -101,20 +103,24 @@ export default function ReportsIndex() {
                 },
             );
         } else if (action === "clear") {
-            router.delete(route(`${basePath}.reports.clearFailures`), {
-                preserveScroll: true,
-                onSuccess: () =>
-                    setToast({
-                        message: "🧹 All email failures cleared successfully!",
-                        type: "success",
-                    }),
-                onError: () =>
-                    setToast({
-                        message:
-                            "❌ Failed to clear failures. Please try again.",
-                        type: "error",
-                    }),
-            });
+            router.post(
+                route(`${basePath}.reports.clearEmailFailures`),
+                {},
+                {
+                    preserveScroll: true,
+                    onSuccess: () =>
+                        setToast({
+                            message:
+                                "🧹 All email failures cleared successfully!",
+                            type: "success",
+                        }),
+                    onError: () =>
+                        setToast({
+                            message: "❌ Failed to clear failures. Try again.",
+                            type: "error",
+                        }),
+                },
+            );
         }
     };
 
@@ -136,7 +142,6 @@ export default function ReportsIndex() {
                 />
             )}
 
-            {/* ✅ Custom confirmation modal */}
             <ConfirmationModal
                 open={modal.open}
                 title={
@@ -150,13 +155,10 @@ export default function ReportsIndex() {
                         : "Are you sure you want to retry sending this Loan Agreement email?"
                 }
                 onConfirm={confirmModalAction}
-                onCancel={() =>
-                    setModal({ open: false, action: null, loanId: null })
-                }
+                onCancel={closeModal}
             />
 
             <div className="py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                {/* 🔎 Search + Print */}
                 <div className="flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
                     <div className="font-semibold text-gray-800 text-lg">
                         All Loans
@@ -178,20 +180,18 @@ export default function ReportsIndex() {
                     </div>
                 </div>
 
-                {/* ⚠️ Recent Email Failures */}
-                {failures && failures.length > 0 && (
+                {failures?.length > 0 && (
                     <div className="bg-red-50 border border-red-300 p-4 rounded-lg shadow-md">
                         <h3 className="text-red-700 font-bold text-sm mb-2">
                             ⚠️ Recent Email Failures
                         </h3>
-
                         <ul className="divide-y divide-red-200 mb-3">
                             {failures.map((f) => (
                                 <li
                                     key={f.id}
                                     className="py-2 flex flex-col md:flex-row md:items-center md:justify-between text-sm text-red-700"
                                 >
-                                    <div className="space-y-1 md:space-y-0">
+                                    <div>
                                         <div>
                                             Failed to send <b>{f.subject}</b> to{" "}
                                             <b>{f.recipient}</b>
@@ -217,8 +217,6 @@ export default function ReportsIndex() {
                                 </li>
                             ))}
                         </ul>
-
-                        {/* 🧹 Clear All Failures */}
                         <button
                             onClick={() => openModal("clear")}
                             className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs font-semibold shadow-sm transition"
@@ -228,7 +226,6 @@ export default function ReportsIndex() {
                     </div>
                 )}
 
-                {/* 📊 Loan Table */}
                 <div
                     ref={tableRef}
                     className="overflow-x-auto bg-white rounded-lg shadow"
@@ -236,7 +233,6 @@ export default function ReportsIndex() {
                     <h2 className="text-center text-lg font-bold my-4 bg-gray-800 text-white py-2 rounded-md shadow-sm">
                         Loan Reports
                     </h2>
-
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-100 text-gray-800">
                             <tr>
@@ -260,7 +256,6 @@ export default function ReportsIndex() {
                                 ))}
                             </tr>
                         </thead>
-
                         <tbody className="divide-y divide-gray-200">
                             {loans.length ? (
                                 loans.map((loan) => (
@@ -272,9 +267,7 @@ export default function ReportsIndex() {
                                             #{loan.id}
                                         </td>
                                         <td className="px-4 py-3 text-sm">
-                                            {loan.client_name ||
-                                                loan.customer?.full_name ||
-                                                "—"}
+                                            {loan.client_name || "—"}
                                         </td>
                                         <td className="px-4 py-3 text-sm">
                                             {money(loan.amount)}
@@ -318,7 +311,6 @@ export default function ReportsIndex() {
                                             >
                                                 View Full Report
                                             </Link>
-
                                             {canManage && (
                                                 <Link
                                                     href={route(

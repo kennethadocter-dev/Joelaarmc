@@ -163,17 +163,18 @@ class LoanController extends Controller
             $term   = (int)$validated['term_months'];
             $rate   = (float)$validated['interest_rate'];
 
+            // ✅ Ensure total includes interest only once
             $interestMultipliers = [
                 1 => 1.20, 2 => 1.31, 3 => 1.425, 4 => 1.56, 5 => 1.67, 6 => 1.83,
             ];
-
             $multiplier = $interestMultipliers[$term] ?? (1 + $rate / 100);
-            $totalDue   = round($amount * $multiplier, 2);
-            $interestEarned = round($totalDue - $amount, 2);
+            $totalWithInterest = round($amount * $multiplier, 2);
+            $interestEarned = round($totalWithInterest - $amount, 2);
 
+            // Generate installment amounts (balanced)
             $round2 = fn($num) => round($num, 2);
             $installments = [];
-            $rawMonthly = $totalDue / $term;
+            $rawMonthly = $totalWithInterest / $term;
             $totalAssigned = 0.00;
 
             for ($i = 1; $i <= $term; $i++) {
@@ -181,7 +182,7 @@ class LoanController extends Controller
                     $amountForThis = $round2($rawMonthly);
                     $totalAssigned += $amountForThis;
                 } else {
-                    $amountForThis = $round2($totalDue - $totalAssigned);
+                    $amountForThis = $round2($totalWithInterest - $totalAssigned);
                 }
                 $installments[$i] = (float)$amountForThis;
             }
@@ -190,6 +191,7 @@ class LoanController extends Controller
                 ? Carbon::parse($validated['due_date'])
                 : Carbon::parse($validated['start_date'])->addMonths($term);
 
+            // ✅ Store correctly aligned values
             $loan = Loan::create([
                 'user_id'          => auth()->id(),
                 'customer_id'      => $validated['customer_id'],
@@ -200,13 +202,14 @@ class LoanController extends Controller
                 'start_date'       => $validated['start_date'],
                 'due_date'         => $dueDate,
                 'amount_paid'      => 0.00,
-                'amount_remaining' => $totalDue,
+                'amount_remaining' => $totalWithInterest, // ✅ fixes mismatch
                 'interest_earned'  => $interestEarned,
+                'total_with_interest' => $totalWithInterest, // ✅ new consistency field
                 'notes'            => $validated['notes'] ?? null,
                 'status'           => 'pending',
             ]);
 
-            // Generate monthly schedule
+            // ✅ Generate monthly schedule
             for ($i = 1; $i <= $term; $i++) {
                 LoanSchedule::create([
                     'loan_id'        => $loan->id,
@@ -220,10 +223,6 @@ class LoanController extends Controller
                 ]);
             }
 
-            $loan->update([
-                'amount_remaining' => LoanSchedule::where('loan_id', $loan->id)->sum('amount_left'),
-            ]);
-
             ActivityLogger::log('Created Loan', "Loan #{$loan->id} created for {$loan->client_name}");
 
             if (!empty($loan->customer?->email)) {
@@ -233,16 +232,17 @@ class LoanController extends Controller
             if (!empty($loan->customer?->phone)) {
                 $msg = "Hi {$loan->client_name}, your loan of ₵" . number_format($loan->amount, 2) .
                     " has been created successfully and is pending approval. " .
-                    "Total repayment: ₵" . number_format($totalDue, 2) .
+                    "Total repayment: ₵" . number_format($totalWithInterest, 2) .
                     " across {$loan->term_months} months.";
                 SmsNotifier::send($loan->customer->phone, $msg);
             }
 
             DB::commit();
-            return redirect()->route($this->basePath() . '.loans.index');
+            return redirect()->route($this->basePath() . '.loans.index')
+                ->with('success', '✅ Loan created successfully.');
         } catch (\Throwable $e) {
             DB::rollBack();
-            dd('Loan creation error:', $e->getMessage(), $e->getTraceAsString());
+            return $this->handleError($e, '❌ Loan creation failed: ' . $e->getMessage());
         }
     }
 
@@ -264,14 +264,13 @@ class LoanController extends Controller
                 ->orderBy('payment_number')
                 ->first();
 
-            // Create payment record
             $payment = Payment::create([
-                'loan_id'      => $loan->id,
-                'amount'       => $validated['amount'],
-                'paid_at'      => now(),
-                'received_by'  => $user->id, // ✅ now stores user ID
+                'loan_id'        => $loan->id,
+                'amount'         => $validated['amount'],
+                'paid_at'        => now(),
+                'received_by'    => $user->id,
                 'payment_method' => 'cash',
-                'note'         => $validated['note'] ?? null,
+                'note'           => $validated['note'] ?? null,
             ]);
 
             if ($nextSchedule) {
@@ -282,7 +281,6 @@ class LoanController extends Controller
                 $nextSchedule->save();
             }
 
-            // Update loan totals
             $loan->amount_paid = $loan->payments()->sum('amount');
             $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
             $loan->status = $loan->amount_remaining <= 0 ? 'paid' : 'active';

@@ -2,10 +2,6 @@ import { defineConfig } from "vite";
 import laravel from "laravel-vite-plugin";
 import react from "@vitejs/plugin-react";
 
-// ============================================================
-// ✅ FIXED VITE CONFIG — Laravel + React (no more .vite folder)
-// ============================================================
-
 export default defineConfig({
     plugins: [
         laravel({
@@ -22,7 +18,6 @@ export default defineConfig({
         rollupOptions: {
             input: ["resources/js/app.jsx", "resources/css/app.css"],
             output: {
-                // 👇 Force manifest and assets to go directly under /public/build
                 assetFileNames: "assets/[name]-[hash][extname]",
                 chunkFileNames: "assets/[name]-[hash].js",
                 entryFileNames: "assets/[name]-[hash].js",
@@ -31,8 +26,12 @@ export default defineConfig({
     },
 
     server: {
-        host: "0.0.0.0",
+        host: "127.0.0.1", // ✅ Fixed: localhost binding
         port: 5173,
+        strictPort: true,
+        hmr: {
+            host: "127.0.0.1",
+        },
     },
 
     resolve: {

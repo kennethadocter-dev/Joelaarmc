@@ -6,6 +6,18 @@ import { resolvePageComponent } from "laravel-vite-plugin/inertia-helpers";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "react-hot-toast"; // ✅ Toast notifications
 
+/* ===========================================================
+   🧩 Disable console logs in production (hide DevTools message)
+   =========================================================== */
+if (import.meta.env.MODE === "production") {
+    console.log = () => {};
+    console.info = () => {};
+    console.warn = () => {};
+}
+
+/* ===========================================================
+   🚀 Inertia App Setup
+   =========================================================== */
 const appName = import.meta.env.VITE_APP_NAME || "Laravel";
 
 createInertiaApp({

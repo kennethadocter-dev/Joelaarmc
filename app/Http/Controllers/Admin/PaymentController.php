@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use App\Helpers\ActivityLogger;
+use App\Helpers\SmsNotifier;
 
 class PaymentController extends Controller
 {
@@ -56,7 +57,7 @@ class PaymentController extends Controller
         }
     }
 
-    /** 🆕 Show "Record Cash Payment" page (Full page) */
+    /** 🆕 Show "Record Cash Payment" page */
     public function create(Request $request)
     {
         try {
@@ -70,7 +71,7 @@ class PaymentController extends Controller
             return Inertia::render('Admin/Payments/RecordPayment', [
                 'loan' => $loan,
                 'expectedAmount' => $loan->amount_remaining ?? 0,
-                'redirect' => $request->query('redirect'), // ✅ keep redirect target
+                'redirect' => $request->query('redirect'),
                 'auth' => ['user' => auth()->user()],
                 'basePath' => $this->basePath(),
                 'flash' => [
@@ -89,12 +90,9 @@ class PaymentController extends Controller
         try {
             Log::info('🧾 Payment Debug Start', [
                 'incoming_data' => $request->all(),
-                'route_params'  => $request->route()->parameters(),
                 'user_id'       => auth()->id(),
-                'env'           => app()->environment(),
             ]);
 
-            // ✅ Support both /loans/{loan}/record-payment and /payments/store
             if (!$request->has('loan_id') && $request->route('loan')) {
                 $request->merge(['loan_id' => $request->route('loan')]);
             }
@@ -123,20 +121,32 @@ class PaymentController extends Controller
 
             Log::info('✅ Payment created successfully', ['payment_id' => $payment->id]);
 
-            // 🔄 Apply payment to loan schedules
+            // 🔄 Apply payment to loan
             $this->applyPaymentToLoan($loan, $validated['amount']);
             DB::commit();
 
             ActivityLogger::log('Cash Payment', "₵{$validated['amount']} recorded for Loan #{$loan->id}");
 
-            // ✅ Handle redirect back to loan page (if provided)
+            /* 📲 SMS Notifications */
+            try {
+                if (!empty($loan->customer->phone)) {
+                    $msg = "Hi {$loan->customer->full_name}, your payment of ₵" . number_format($validated['amount'], 2) . " has been received. Thank you!";
+                    SmsNotifier::send($loan->customer->phone, $msg);
+                }
+
+                if ($loan->amount_remaining <= 0.01) {
+                    $msg2 = "🎉 Hi {$loan->customer->full_name}, congratulations! Your loan has been fully paid off. We appreciate your commitment.";
+                    SmsNotifier::send($loan->customer->phone, $msg2);
+                }
+            } catch (\Throwable $ex) {
+                Log::warning('⚠️ SMS Notification Failed', ['error' => $ex->getMessage()]);
+            }
+
             $redirectUrl = $request->input('redirect');
             if ($redirectUrl) {
-                Log::info('🔁 Redirecting to provided URL', ['redirect' => $redirectUrl]);
                 return redirect($redirectUrl)->with('success', '✅ Cash payment recorded successfully!');
             }
 
-            // fallback if no redirect param
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
                 ->with('success', '✅ Cash payment recorded successfully!');
@@ -146,8 +156,6 @@ class PaymentController extends Controller
             Log::error('❌ Cash Payment Error', [
                 'message' => $e->getMessage(),
                 'trace'   => $e->getTraceAsString(),
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
             ]);
 
             return back()->with('error', '⚠️ Payment failed: ' . $e->getMessage());
@@ -267,6 +275,21 @@ class PaymentController extends Controller
 
             ActivityLogger::log('Paystack Payment', "₵{$amount} paid online for Loan #{$loan->id}");
 
+            /* 📲 SMS after Paystack payment */
+            try {
+                if (!empty($loan->customer->phone)) {
+                    $msg = "Hi {$loan->customer->full_name}, your online payment of ₵" . number_format($amount, 2) . " has been received successfully!";
+                    SmsNotifier::send($loan->customer->phone, $msg);
+                }
+
+                if ($loan->amount_remaining <= 0.01) {
+                    $msg2 = "🎉 Hi {$loan->customer->full_name}, your loan has been fully paid off. Thank you for your trust in Joelaar Micro-Credit!";
+                    SmsNotifier::send($loan->customer->phone, $msg2);
+                }
+            } catch (\Throwable $ex) {
+                Log::warning('⚠️ SMS Notification Failed', ['error' => $ex->getMessage()]);
+            }
+
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
                 ->with('success', "✅ Payment of ₵{$amount} received via Paystack!");
@@ -314,13 +337,11 @@ class PaymentController extends Controller
             'message' => $e->getMessage(),
             'file'    => $e->getFile(),
             'line'    => $e->getLine(),
-            'trace'   => $e->getTraceAsString(),
         ]);
 
         return response()->make("
             <h2 style='color:red'>⚠️ $msg</h2>
             <p><strong>{$e->getMessage()}</strong></p>
-            <pre>{$e->getTraceAsString()}</pre>
         ", 500);
     }
 }

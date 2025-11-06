@@ -13,7 +13,7 @@ use Illuminate\Http\Request;
 class SystemController extends Controller
 {
     /** 🔧 Role-based path helper */
-    private function basePath()
+    private function basePath(): string
     {
         $u = auth()->user();
         return ($u && ($u->is_super_admin || $u->role === 'superadmin'))
@@ -25,8 +25,8 @@ class SystemController extends Controller
     {
         $this->middleware(function ($request, $next) {
             $user = auth()->user();
-            if (!$user || !in_array($user->role, ['admin', 'superadmin', 'superuser'])) {
-                abort(403, 'Access denied.');
+            if (!$user || $user->role !== 'superadmin') {
+                abort(403, 'Access denied. Only Superadmin can access System Control.');
             }
             return $next($request);
         });
@@ -43,20 +43,21 @@ class SystemController extends Controller
             'last_backup' => $this->getLastBackupTime(),
         ];
 
-        return Inertia::render('Admin/System/Index', [
-            'auth' => ['user' => auth()->user()],
-            'stats' => $stats,
+        // ✅ Superadmin only — Inertia view path matches your folder
+        return Inertia::render('Superadmin/System/Index', [
+            'auth'     => ['user' => auth()->user()],
+            'stats'    => $stats,
             'basePath' => $this->basePath(),
-            'backups' => $this->getAllBackups(),
+            'backups'  => $this->getAllBackups(),
         ]);
     }
 
     /** 🕒 Get timestamp of latest backup */
-    private function getLastBackupTime()
+    private function getLastBackupTime(): string
     {
         $backupPath = storage_path('app/backups');
         $latest = collect(glob("$backupPath/*"))
-            ->filter(fn($f) => str_ends_with($f, '.sqlite') || str_ends_with($f, '.sql'))
+            ->filter(fn($f) => str_ends_with($f, '.sqlite') || str_ends_with($f, '.sql') || str_ends_with($f, '.zip'))
             ->sortByDesc(fn($f) => filemtime($f))
             ->first();
 
@@ -65,13 +66,14 @@ class SystemController extends Controller
             : 'No backups yet';
     }
 
-    /** 📦 Helper: Get all backups directly from /storage/app/backups */
-    private function getAllBackups()
+    /** 📦 Get all backups from storage/app/backups */
+    private function getAllBackups(): array
     {
         $backupPath = storage_path('app/backups');
+        if (!file_exists($backupPath)) return [];
 
         return collect(glob("$backupPath/*"))
-            ->filter(fn($f) => str_ends_with($f, '.sqlite') || str_ends_with($f, '.sql'))
+            ->filter(fn($f) => str_ends_with($f, '.sqlite') || str_ends_with($f, '.sql') || str_ends_with($f, '.zip'))
             ->sortByDesc(fn($f) => filemtime($f))
             ->map(fn($f) => [
                 'file' => basename($f),
@@ -82,208 +84,148 @@ class SystemController extends Controller
             ->toArray();
     }
 
-    /**
-     * 💾 Create new backup (SQLite, MySQL & PostgreSQL supported)
-     */
+    /** 💾 Create a new backup */
     public function backupData(Request $request)
     {
-        \Log::info("⚡ backupData() triggered by " . (auth()->user()->email ?? 'guest'));
-
         try {
             $backupDir = storage_path('app/backups');
             if (!file_exists($backupDir)) mkdir($backupDir, 0755, true);
 
             $timestamp = now()->format('Y-m-d_H-i-s');
-            $connection = config('database.default');
-            $backupFile = "{$backupDir}/backup-{$timestamp}." . ($connection === 'sqlite' ? 'sqlite' : 'sql');
-
             $driver = DB::getDriverName();
+            $backupFile = "{$backupDir}/backup-{$timestamp}." . ($driver === 'sqlite' ? 'sqlite' : 'sql');
 
             if ($driver === 'sqlite') {
                 $dbPath = database_path('database.sqlite');
                 if (!file_exists($dbPath)) throw new \Exception('SQLite database file not found.');
                 copy($dbPath, $backupFile);
-            }
-
-            elseif ($driver === 'pgsql') {
-                // ✅ Safe PostgreSQL backup generator (pure PHP)
+            } elseif ($driver === 'pgsql') {
                 $dbConfig = config("database.connections.pgsql");
                 $dbName = $dbConfig['database'];
-
                 $tables = collect(DB::select("SELECT tablename FROM pg_tables WHERE schemaname='public';"))
-                    ->pluck('tablename')
-                    ->toArray();
+                    ->pluck('tablename')->toArray();
 
-                if (empty($tables)) {
-                    throw new \Exception('No PostgreSQL tables found.');
-                }
-
-                $dump = "-- Laravel PostgreSQL Pure-PHP Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\n";
-
+                $dump = "-- PostgreSQL Backup for {$dbName} - " . now() . "\n\n";
                 foreach ($tables as $table) {
-                    // Add CREATE TABLE definition
-                    $create = DB::select("
-                        SELECT 'CREATE TABLE ' || relname || E' (\n' ||
-                        array_to_string(
-                            array_agg('    ' || column_name || ' ' || type || coalesce(' DEFAULT ' || column_default, '') || case when is_nullable = 'NO' then ' NOT NULL' else '' end),
-                            E',\n'
-                        ) || E'\n);'
-                        AS create_statement
-                        FROM (
-                            SELECT c.relname, a.attname AS column_name,
-                                pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
-                                (SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid)
-                                 FROM pg_catalog.pg_attrdef d
-                                 WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef) AS column_default,
-                                a.attnotnull AS is_nullable
-                            FROM pg_catalog.pg_attribute a
-                            JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
-                            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                            WHERE n.nspname = 'public' AND c.relname = ?
-                            AND a.attnum > 0 AND NOT a.attisdropped
-                            ORDER BY a.attnum
-                        ) sub
-                        GROUP BY relname
-                    ", [$table]);
-
-                    if (!empty($create) && isset($create[0]->create_statement)) {
-                        $dump .= "DROP TABLE IF EXISTS \"$table\" CASCADE;\n";
-                        $dump .= $create[0]->create_statement . "\n\n";
-                    }
-
-                    // Insert data rows
                     $rows = DB::table($table)->get();
-                    if ($rows->isNotEmpty()) {
-                        foreach ($rows as $row) {
-                            $cols = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
-                            $vals = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
-                            $dump .= "INSERT INTO \"$table\" (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ");\n";
-                        }
-                        $dump .= "\n";
+                    foreach ($rows as $row) {
+                        $cols = array_map(fn($c) => "\"$c\"", array_keys((array)$row));
+                        $vals = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
+                        $dump .= "INSERT INTO \"$table\" (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ");\n";
                     }
+                    $dump .= "\n";
                 }
-
                 file_put_contents($backupFile, $dump);
-            }
-
-            else {
-                // ✅ MySQL version
+            } else {
                 $dbConfig = config("database.connections.mysql");
-                if (!$dbConfig) throw new \Exception('MySQL configuration missing.');
                 $dbName = $dbConfig['database'];
+                $tables = collect(DB::select('SHOW TABLES'))->map(fn($t) => array_values((array)$t)[0])->toArray();
 
-                $tables = collect(DB::select('SHOW TABLES'))
-                    ->map(fn($t) => array_values((array)$t)[0])
-                    ->toArray();
-
-                if (empty($tables)) throw new \Exception('No tables found in database.');
-
-                $dump = "-- Laravel Auto Backup\n-- Database: {$dbName}\n-- Created: " . now() . "\n\nSET FOREIGN_KEY_CHECKS=0;\n\n";
+                $dump = "-- MySQL Backup: {$dbName} | " . now() . "\n\nSET FOREIGN_KEY_CHECKS=0;\n\n";
                 foreach ($tables as $table) {
                     $create = DB::select("SHOW CREATE TABLE `$table`")[0]->{'Create Table'};
                     $dump .= "DROP TABLE IF EXISTS `$table`;\n$create;\n\n";
-
                     $rows = DB::table($table)->get();
-                    if ($rows->isNotEmpty()) {
-                        foreach ($rows as $row) {
-                            $columns = array_map(fn($c) => "`$c`", array_keys((array)$row));
-                            $values = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
-                            $dump .= "INSERT INTO `$table` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ");\n";
-                        }
-                        $dump .= "\n";
+                    foreach ($rows as $row) {
+                        $columns = array_map(fn($c) => "`$c`", array_keys((array)$row));
+                        $values = array_map(fn($v) => is_null($v) ? 'NULL' : DB::getPdo()->quote($v), array_values((array)$row));
+                        $dump .= "INSERT INTO `$table` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ");\n";
                     }
+                    $dump .= "\n";
                 }
                 $dump .= "SET FOREIGN_KEY_CHECKS=1;\n";
                 file_put_contents($backupFile, $dump);
             }
 
-            if (!file_exists($backupFile) || filesize($backupFile) === 0) {
-                throw new \Exception('Backup file not created or empty.');
-            }
-
             $this->cleanupOldBackups($backupDir);
 
             if (class_exists(\App\Helpers\ActivityLogger::class)) {
-                \App\Helpers\ActivityLogger::log('System Backup', 'Database backup created by ' . auth()->user()->name . ' (' . basename($backupFile) . ')');
+                \App\Helpers\ActivityLogger::log('System Backup', 'Backup created by ' . auth()->user()->name);
             }
 
-            $files = $this->getAllBackups();
-
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'success' => true,
-                    'message' => '✅ Backup completed successfully.',
-                    'backups' => $files,
-                ]);
-            }
-
-            return Inertia::render('Admin/System/Index', [
-                'auth' => ['user' => auth()->user()],
-                'stats' => [
-                    'users' => DB::table('users')->count(),
-                    'customers' => DB::table('customers')->count(),
-                    'loans' => DB::table('loans')->count(),
-                    'payments' => DB::table('payments')->count(),
-                    'last_backup' => $this->getLastBackupTime(),
-                ],
-                'basePath' => $this->basePath(),
-                'backups' => $files,
-            ])->with('success', '✅ Backup completed successfully.');
-
+            return response()->json([
+                'success' => true,
+                'message' => '✅ Backup completed successfully.',
+                'backups' => $this->getAllBackups(),
+            ]);
         } catch (\Throwable $e) {
-            \Log::error('❌ Backup failed', ['error' => $e->getMessage()]);
-            return back()->with('error', '❌ Backup failed: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => '❌ Backup failed: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
-    /** 🧹 Keep only latest 5 backups */
-    private function cleanupOldBackups($dir)
+    /** 🧹 Keep only 5 latest backups */
+    private function cleanupOldBackups($dir): void
     {
-        $files = collect(glob("$dir/*"))
-            ->sortByDesc(fn($f) => filemtime($f))
-            ->skip(5);
+        $files = collect(glob("$dir/*"))->sortByDesc(fn($f) => filemtime($f))->skip(5);
         foreach ($files as $oldFile) @unlink($oldFile);
     }
 
-    /** 📋 List all available backup files */
+    /** 📋 List backups */
     public function listBackups()
     {
         return response()->json(['backups' => $this->getAllBackups()]);
     }
 
-    /** 🗑️ Delete a specific backup file + log it */
+    /** 🗑️ Delete backup */
     public function deleteBackup($file)
     {
         try {
             $path = storage_path("app/backups/{$file}");
-            if (!file_exists($path)) return back()->with('error', '⚠️ Backup file not found.');
-            unlink($path);
-
-            if (class_exists(\App\Helpers\ActivityLogger::class)) {
-                \App\Helpers\ActivityLogger::log('Delete Backup', "Backup file {$file} deleted by " . auth()->user()->name);
+            if (!file_exists($path)) {
+                return response()->json(['success' => false, 'message' => '⚠️ Backup file not found.'], 404);
             }
-
-            return back()->with('success', "🗑️ Backup {$file} deleted successfully.");
+            unlink($path);
+            return response()->json([
+                'success' => true,
+                'message' => '🗑️ Backup deleted successfully.',
+                'backups' => $this->getAllBackups(),
+            ]);
         } catch (\Throwable $e) {
-            return back()->with('error', '❌ Failed to delete backup: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => '❌ Delete failed: ' . $e->getMessage()], 500);
         }
     }
 
-    /** 📥 Download backup file */
+    /** 📥 Download backup */
     public function downloadBackup($file)
     {
         $path = storage_path("app/backups/{$file}");
-        if (!file_exists($path)) return back()->with('error', '⚠️ Backup file not found.');
+        if (!file_exists($path)) {
+            return back()->with('error', '⚠️ Backup file not found.');
+        }
         return response()->download($path);
     }
 
-    /** 🩹 Restore a selected backup file */
+    /** 📤 Upload backup */
+    public function uploadBackup(Request $request)
+    {
+        $request->validate(['backup_file' => 'required|file|mimes:zip,sql,sqlite|max:51200']);
+        $file = $request->file('backup_file');
+        $path = storage_path('app/backups');
+        if (!file_exists($path)) mkdir($path, 0755, true);
+
+        $filename = time() . '_' . $file->getClientOriginalName();
+        $file->move($path, $filename);
+
+        if (class_exists(\App\Helpers\ActivityLogger::class)) {
+            \App\Helpers\ActivityLogger::log('System Upload', 'Backup uploaded by ' . auth()->user()->name);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => '✅ Backup uploaded successfully!',
+            'backups' => $this->getAllBackups(),
+        ]);
+    }
+
+    /** ♻️ Restore from backup */
     public function restoreData(Request $request)
     {
         try {
             $file = $request->input('file');
             if (!$file) throw new \Exception('No backup file selected.');
-
             $path = storage_path("app/backups/{$file}");
             if (!file_exists($path)) throw new \Exception('Selected backup file not found.');
 
@@ -293,7 +235,7 @@ class SystemController extends Controller
             if ($driver === 'sqlite') {
                 copy($path, database_path('database.sqlite'));
             } elseif ($driver === 'pgsql') {
-                $command = sprintf(
+                $cmd = sprintf(
                     'PGPASSWORD=%s psql -h %s -p %s -U %s -d %s -f %s',
                     escapeshellarg($db['password']),
                     escapeshellarg($db['host']),
@@ -302,29 +244,25 @@ class SystemController extends Controller
                     escapeshellarg($db['database']),
                     escapeshellarg($path)
                 );
-                shell_exec($command);
+                shell_exec($cmd);
             } else {
-                $command = sprintf(
+                $cmd = sprintf(
                     'mysql -u%s -p%s %s < %s',
                     escapeshellarg($db['username']),
                     escapeshellarg($db['password']),
                     escapeshellarg($db['database']),
                     escapeshellarg($path)
                 );
-                shell_exec($command);
+                shell_exec($cmd);
             }
 
-            if (class_exists(\App\Helpers\ActivityLogger::class)) {
-                \App\Helpers\ActivityLogger::log('System Restore', 'Database restored from ' . basename($file) . ' by ' . auth()->user()->name);
-            }
-
-            return back()->with('success', '✅ Database restored successfully from ' . basename($file));
+            return response()->json(['success' => true, 'message' => '✅ Database restored successfully.']);
         } catch (\Throwable $e) {
-            return back()->with('error', '❌ Restore failed: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => '❌ Restore failed: ' . $e->getMessage()], 500);
         }
     }
 
-    /** ♻️ Reset all system data */
+    /** 🔄 Reset all data */
     public function resetData(Request $request)
     {
         try {
@@ -337,45 +275,39 @@ class SystemController extends Controller
 
             $tables = ['customers', 'guarantors', 'loans', 'loan_schedules', 'payments', 'activity_logs', 'sms_logs'];
             foreach ($tables as $table) {
-                if (Schema::hasTable($table)) {
-                    DB::table($table)->truncate();
-                }
+                if (Schema::hasTable($table)) DB::table($table)->truncate();
             }
 
             $keepRoles = match ($keepMode) {
                 'keep_all_staff' => ['superadmin', 'admin', 'staff'],
-                'keep_admins' => ['superadmin', 'admin'],
-                default => ['superadmin'],
+                'keep_admins'    => ['superadmin', 'admin'],
+                default          => ['superadmin'],
             };
 
             User::whereNotIn('role', $keepRoles)->delete();
             Schema::enableForeignKeyConstraints();
             DB::commit();
 
-            if (class_exists(\App\Helpers\ActivityLogger::class)) {
-                \App\Helpers\ActivityLogger::log('System Reset', 'System data cleared by ' . auth()->user()->name . " | Mode: {$keepMode}");
-            }
-
-            return back()->with('success', "✅ All data cleared successfully. Mode: {$keepMode}");
+            return response()->json(['success' => true, 'message' => "✅ All data cleared successfully. Mode: {$keepMode}"]);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return back()->with('error', '❌ Reset failed: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => '❌ Reset failed: ' . $e->getMessage()], 500);
         }
     }
 
-    /** 🧠 Preview data before reset */
+    /** 🧠 Preview before reset */
     public function previewReset()
     {
         try {
             $stats = [
                 'customers' => DB::table('customers')->count(),
-                'loans' => DB::table('loans')->count(),
-                'payments' => DB::table('payments')->count(),
-                'users' => DB::table('users')->count(),
+                'loans'     => DB::table('loans')->count(),
+                'payments'  => DB::table('payments')->count(),
+                'users'     => DB::table('users')->count(),
             ];
-            return response()->json(['success' => true, 'message' => '✅ Data preview loaded successfully.', 'stats' => $stats]);
+            return response()->json(['success' => true, 'stats' => $stats]);
         } catch (\Throwable $e) {
-            return response()->json(['success' => false, 'message' => '❌ Failed to load preview data.'], 500);
+            return response()->json(['success' => false, 'message' => '❌ Failed to load preview data: ' . $e->getMessage()], 500);
         }
     }
 }

@@ -14,7 +14,7 @@ class User extends Authenticatable
     /**
      * The attributes that are mass assignable.
      *
-     * @var list<string>
+     * @var array<int, string>
      */
     protected $fillable = [
         'name',
@@ -22,14 +22,14 @@ class User extends Authenticatable
         'phone',
         'password',
         'role',
-        'is_super_admin', // ✅ flag for special superadmin
-        'username',       // ✅ newly added for unique portal URLs
+        'is_super_admin', // ✅ Flag for top-level access
+        'username',       // ✅ Unique login/profile handle
     ];
 
     /**
-     * The attributes that should be hidden for serialization.
+     * The attributes that should be hidden for arrays / JSON.
      *
-     * @var list<string>
+     * @var array<int, string>
      */
     protected $hidden = [
         'password',
@@ -39,20 +39,26 @@ class User extends Authenticatable
     /**
      * The attributes that should be type-cast.
      *
-     * @return array<string, string>
+     * @var array<string, string>
      */
-    protected function casts(): array
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        'is_super_admin'    => 'boolean',
+    ];
+
+    /**
+     * Automatically hash passwords.
+     */
+    protected function password(): Attribute
     {
-        return [
-            'email_verified_at' => 'datetime',
-            'password'          => 'hashed',
-            'is_super_admin'    => 'boolean',
-        ];
+        return Attribute::make(
+            set: fn($value) => !empty($value) ? bcrypt($value) : null
+        );
     }
 
     /**
-     * ✅ Automatically generate a username when creating a user
-     * (e.g. adm-john-582, cli-jane-203)
+     * ✅ Automatically generate a username when creating a user.
+     * Example: sup-john-doe-582, adm-jane-203
      */
     protected static function booted()
     {
@@ -66,15 +72,16 @@ class User extends Authenticatable
                     default      => 'usr',
                 };
 
-                $base = Str::slug($user->name ?: 'user');
+                $base = Str::slug(strtolower($user->name ?: 'user'));
                 $user->username = "{$prefix}-{$base}-" . rand(100, 999);
             }
         });
     }
 
-    /**
-     * ✅ Helper: Check if this user is a Super Admin.
-     */
+    /* ===========================================================
+       🔑 ROLE HELPERS
+       =========================================================== */
+
     public function isSuperAdmin(): bool
     {
         return $this->role === 'superadmin'
@@ -82,9 +89,24 @@ class User extends Authenticatable
             || $this->email === 'super@admin.com';
     }
 
-    /**
-     * ✅ Relationships
-     */
+    public function isAdmin(): bool
+    {
+        return in_array($this->role, ['admin', 'superadmin']);
+    }
+
+    public function isStaff(): bool
+    {
+        return $this->role === 'staff';
+    }
+
+    public function isUser(): bool
+    {
+        return $this->role === 'user';
+    }
+
+    /* ===========================================================
+       🤝 RELATIONSHIPS
+       =========================================================== */
 
     // A user can create many loans
     public function loans()

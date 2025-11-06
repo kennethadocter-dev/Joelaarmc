@@ -1,7 +1,8 @@
+@import "./no-flicker.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@import "./no-flicker.css";
 
 /* 🌞 Clean global theme — stable with no @apply circular issues */
 @layer base {

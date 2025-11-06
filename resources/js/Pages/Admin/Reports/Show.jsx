@@ -2,9 +2,12 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, usePage, router } from "@inertiajs/react";
 import { useMemo } from "react";
 import html2pdf from "html2pdf.js";
-import axios from "axios"; // 👈 for fallback refresh
+import { route } from "ziggy-js"; // ✅ correct modern import // ✅ ensures compatibility for basePath use
 
+// 💰 Currency formatter
 const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
+
+// 📅 Date formatter
 const fmt = (d) =>
     d
         ? new Date(d).toLocaleDateString("en-US", {
@@ -14,12 +17,14 @@ const fmt = (d) =>
           })
         : "—";
 
+// 📈 Interest multiplier logic
 function getEffectiveMultiplier(term, rate) {
     const base = rate / 100;
     const table = { 1: 1 + base, 2: 1.31, 3: 1.425, 4: 1.56, 5: 1.67, 6: 1.83 };
     return table[term] ?? 1 + base;
 }
 
+// 📅 Build repayment schedule
 function buildSchedule(amount, ratePct, term, startDate) {
     if (!amount || !ratePct || !term || !startDate) return [];
     const multiplier = getEffectiveMultiplier(term, ratePct);
@@ -47,14 +52,24 @@ export default function ReportShow() {
         auth = {},
     } = usePage().props;
 
-    const user = auth?.user || {};
+    if (!loan) {
+        return (
+            <AuthenticatedLayout>
+                <Head title="Loan Report" />
+                <div className="p-10 text-center text-red-600 font-semibold">
+                    ⚠️ Loan data could not be loaded.
+                </div>
+            </AuthenticatedLayout>
+        );
+    }
 
+    const user = auth?.user || {};
     const multiplier = getEffectiveMultiplier(
         loan.term_months,
         loan.interest_rate,
     );
     const totalWithInterest = loan.amount * multiplier;
-    const monthlyPayment = totalWithInterest / loan.term_months;
+    const monthlyPayment = totalWithInterest / (loan.term_months || 1);
 
     const schedule = useMemo(
         () =>
@@ -76,15 +91,13 @@ export default function ReportShow() {
         loan.client_name
     } (hereinafter referred to as the "Borrower").`;
 
+    /** 🖨 Print document */
     const handlePrint = () => {
         const element = document.getElementById("agreement-wrapper");
-        if (!element) {
-            alert("⚠️ Agreement section not found!");
-            return;
-        }
+        if (!element) return alert("⚠️ Agreement section not found!");
 
         const opt = {
-            margin: 0.3,
+            margin: 0.4,
             image: { type: "jpeg", quality: 0.98 },
             html2canvas: { scale: 2, useCORS: true },
             jsPDF: { unit: "in", format: "A4", orientation: "portrait" },
@@ -109,10 +122,11 @@ export default function ReportShow() {
             });
     };
 
+    /** 💾 Download PDF file */
     const handleDownload = () => {
         const element = document.getElementById("agreement-wrapper");
         const opt = {
-            margin: 0.3,
+            margin: 0.4,
             filename: `Loan_Agreement_${loan.id}.pdf`,
             image: { type: "jpeg", quality: 0.98 },
             html2canvas: { scale: 2, useCORS: true },
@@ -121,18 +135,13 @@ export default function ReportShow() {
         html2pdf().set(opt).from(element).save();
     };
 
-    /** 🔄 Refresh Button Logic */
-    const handleRefresh = async () => {
+    /** 🔄 Refresh data */
+    const handleRefresh = () => {
         try {
-            // 🟢 Preferred smooth Inertia reload:
             router.reload({ only: ["loan", "guarantors"] });
-
-            // 🔸 Optional fallback if router.reload fails:
-            // const res = await axios.get(route(`${basePath}.loans.show`, loan.id));
-            // if (res?.data?.props?.loan) window.location.reload();
         } catch (err) {
-            console.error("Failed to refresh loan data:", err);
-            alert("⚠️ Could not refresh loan data. Please reload manually.");
+            console.error("Refresh failed:", err);
+            alert("⚠️ Could not refresh loan data.");
         }
     };
 
@@ -147,7 +156,7 @@ export default function ReportShow() {
             <Head title={`Loan Report #${loan.id}`} />
 
             <div className="py-8 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 print:max-w-full print:px-8">
-                {/* Action Buttons */}
+                {/* 🔙 Top Bar */}
                 <div className="flex justify-between items-center no-print">
                     <Link
                         href={route(`${basePath}.reports.index`)}
@@ -156,19 +165,18 @@ export default function ReportShow() {
                         ← Back to Reports
                     </Link>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                         <button
                             onClick={handlePrint}
-                            className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-md shadow hover:bg-gray-900 transition"
+                            className="px-4 py-2 bg-gray-800 text-white rounded-md shadow hover:bg-gray-900 transition"
                         >
-                            🖨️ Print
+                            🖨 Print
                         </button>
-
                         <button
                             onClick={handleDownload}
-                            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md shadow hover:bg-gray-700 transition"
+                            className="px-4 py-2 bg-gray-600 text-white rounded-md shadow hover:bg-gray-700 transition"
                         >
-                            ⬇️ Download PDF
+                            ⬇ Download
                         </button>
 
                         <form
@@ -192,17 +200,16 @@ export default function ReportShow() {
                             </button>
                         </form>
 
-                        {/* 🔄 Refresh Data Button */}
                         <button
                             onClick={handleRefresh}
                             className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow"
                         >
-                            🔄 Refresh Data
+                            🔄 Refresh
                         </button>
                     </div>
                 </div>
 
-                {/* Agreement Document */}
+                {/* 📝 Agreement */}
                 <div
                     id="agreement-wrapper"
                     className="bg-white text-black p-6 rounded-lg shadow-md border border-gray-200"
@@ -257,44 +264,36 @@ export default function ReportShow() {
                         <p>{agreementLine}</p>
                     </section>
 
-                    <section>
-                        <h3 className="font-semibold text-lg mt-6">
+                    <section className="mt-6">
+                        <h3 className="font-semibold text-lg">
                             CLAUSE 2: SUBJECT MATTER AND DURATION
                         </h3>
                         <p>
-                            The subject matter is a loan facility of{" "}
-                            <strong>{money(loan.amount)}</strong> provided by
-                            the Lender to the Borrower for a period of{" "}
-                            <strong>{loan.term_months} month(s)</strong>{" "}
-                            commencing on{" "}
+                            The loan of <strong>{money(loan.amount)}</strong> is
+                            granted for <strong>{loan.term_months}</strong>{" "}
+                            month(s), starting on{" "}
                             <strong>{fmt(loan.start_date)}</strong>.
                         </p>
                     </section>
 
-                    <section>
-                        <h3 className="font-semibold text-lg mt-6">
+                    <section className="mt-6">
+                        <h3 className="font-semibold text-lg">
                             CLAUSE 3: AMOUNT, INTEREST AND TOTAL PAYABLE
                         </h3>
                         <p>
-                            The loan attracts a stepped rate bringing the total
-                            payable to{" "}
-                            <strong>{money(totalWithInterest)}</strong>. Each
-                            monthly installment is{" "}
-                            <strong>{money(monthlyPayment)}</strong> for{" "}
-                            <strong>{loan.term_months}</strong> months.
+                            Total payable:{" "}
+                            <strong>{money(totalWithInterest)}</strong>. Monthly
+                            installment:{" "}
+                            <strong>{money(monthlyPayment)}</strong>.
                         </p>
+                    </section>
 
-                        <h3 className="font-semibold text-lg mt-4">
+                    <section className="mt-6">
+                        <h3 className="font-semibold text-lg">
                             CLAUSE 4: TERMS OF PAYMENT
                         </h3>
-                        <p>
-                            The Borrower shall make <strong>monthly</strong>{" "}
-                            payments commencing on{" "}
-                            <strong>{fmt(loan.start_date)}</strong>. The
-                            repayment schedule is as follows:
-                        </p>
-
-                        <table className="min-w-full text-sm mt-4 border border-gray-400 rounded">
+                        <p>Repayment schedule:</p>
+                        <table className="min-w-full text-sm mt-3 border border-gray-400 rounded">
                             <thead className="bg-gray-100 text-gray-800">
                                 <tr>
                                     <th className="px-4 py-2 text-left border-b border-gray-300">
@@ -309,20 +308,20 @@ export default function ReportShow() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {schedule.map((row) => (
+                                {schedule.map((r) => (
                                     <tr
-                                        key={row.month}
+                                        key={r.month}
                                         className="border-t border-gray-300"
                                     >
                                         <td className="px-4 py-2">
-                                            {row.month}
-                                            {getOrdinal(row.month)} Payment
+                                            {r.month}
+                                            {getOrdinal(r.month)} Payment
                                         </td>
                                         <td className="px-4 py-2">
-                                            {money(row.amount)}
+                                            {money(r.amount)}
                                         </td>
                                         <td className="px-4 py-2">
-                                            {fmt(row.due_date)}
+                                            {fmt(r.due_date)}
                                         </td>
                                     </tr>
                                 ))}
@@ -330,14 +329,13 @@ export default function ReportShow() {
                         </table>
                     </section>
 
-                    {/* Remaining Clauses */}
                     <section className="space-y-4 mt-6 text-gray-800">
                         <h3 className="font-semibold text-lg">
                             CLAUSE 5: PENALTY
                         </h3>
                         <p>
-                            If the Borrower fails to pay on time, a penalty of{" "}
-                            <strong>0.5%</strong> per day will apply.
+                            A penalty of <strong>0.5% per day</strong> applies
+                            for late payment.
                         </p>
 
                         <h3 className="font-semibold text-lg">
@@ -353,7 +351,7 @@ export default function ReportShow() {
                         </h3>
                         <p>
                             The Borrower hypothecates present and future stock
-                            as security for this loan.
+                            as security.
                         </p>
 
                         <h3 className="font-semibold text-lg">
@@ -381,7 +379,7 @@ export default function ReportShow() {
                         )}
                     </section>
 
-                    {/* Signatures */}
+                    {/* ✍ Signatures */}
                     <section className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-10">
                         <div>
                             <div className="h-12 border-b border-gray-400"></div>
@@ -404,21 +402,20 @@ export default function ReportShow() {
                         </div>
                     </section>
 
-                    {/* Bank Info */}
                     <div className="mt-6 text-sm">
                         <strong>Bank Account Number:</strong>{" "}
                         {loan.customer?.bank_account ||
                             "____________________________"}
                     </div>
 
-                    {/* Footer */}
                     <footer className="mt-12 border-t border-gray-400 pt-3 text-center text-xs text-gray-600">
                         <p>
                             <strong>Joelaar Micro-Credit Services</strong> |
-                            Bolgatanga, Ghana | Tel:{" "}
+                            Bolgatanga, Ghana | Tel:
                             <span className="text-gray-700">
-                                +233 24 123 4567
-                            </span>{" "}
+                                {" "}
+                                +233 24 123 4567{" "}
+                            </span>
                             | Email:{" "}
                             <span className="text-gray-700">
                                 info@joelaarcredit.com
@@ -433,25 +430,26 @@ export default function ReportShow() {
             </div>
 
             <style>{`
-        @media print {
-          header, nav, footer.no-print, aside, [data-sidebar], [data-header] {
-            display: none !important;
-          }
-          #agreement-wrapper {
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-            width: 100% !important;
-            margin: 0 auto !important;
-            padding: 0.5in !important;
-          }
-        }
-      `}</style>
+              @media print {
+                header, nav, footer.no-print, aside, [data-sidebar], [data-header] {
+                  display: none !important;
+                }
+                #agreement-wrapper {
+                  background: white !important;
+                  color: black !important;
+                  box-shadow: none !important;
+                  border: none !important;
+                  width: 100% !important;
+                  margin: 0 auto !important;
+                  padding: 0.5in !important;
+                }
+              }
+            `}</style>
         </AuthenticatedLayout>
     );
 }
 
+// 📘 Ordinal suffix helper
 function getOrdinal(n) {
     const s = ["th", "st", "nd", "rd"],
         v = n % 100;

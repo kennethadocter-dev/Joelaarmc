@@ -12,8 +12,8 @@ use App\Helpers\ActivityLogger;
 
 class SettingsController extends Controller
 {
-    /** 🔧 Role-based path helper */
-    private function basePath()
+    /** 🔧 Role-based helper (kept for routes and logging) */
+    private function basePath(): string
     {
         $u = auth()->user();
         return ($u && ($u->is_super_admin || $u->role === 'superadmin'))
@@ -21,23 +21,18 @@ class SettingsController extends Controller
             : 'admin';
     }
 
-    /**
-     * 🧭 Restrict access to Admins
-     */
     public function __construct()
     {
         $this->middleware(['auth', 'can:access-admin']);
     }
 
-    /**
-     * ⚙️ Display the Settings page
-     */
+    /** ⚙️ Settings Page (shared for Admin + Superadmin) */
     public function index()
     {
         try {
-            // Ensure one settings record always exists
             $settings = Setting::firstOrCreate([]);
 
+            // ✅ Always load the shared React component
             return Inertia::render('Admin/Settings/Index', [
                 'settings' => $settings,
                 'auth'     => ['user' => auth()->user()],
@@ -48,20 +43,17 @@ class SettingsController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load settings page.');
+            return $this->handleError($e, '⚠️ Failed to load settings.');
         }
     }
 
-    /**
-     * 💾 Update Settings (Flexible for partial updates + Inertia safe)
-     */
+    /** 💾 Update Settings (shared) */
     public function update(Request $request)
     {
         try {
-            // All fields are optional to prevent validation blocking
             $validated = $request->validate([
                 'company_name'          => 'nullable|string|max:255',
-                'address'               => 'nullable|string|max:2000',
+                'address'               => 'nullable|string|max:255',
                 'phone'                 => 'nullable|string|max:255',
                 'email'                 => 'nullable|email|max:255',
                 'bank_name'             => 'nullable|string|max:255',
@@ -69,49 +61,44 @@ class SettingsController extends Controller
                 'manager_name'          => 'nullable|string|max:255',
                 'manager_title'         => 'nullable|string|max:255',
                 'default_interest_rate' => 'nullable|numeric|min:0',
-                'default_term_months'   => 'nullable|integer|min:1|max:36',
+                'default_term_months'   => 'nullable|integer|min:1',
                 'default_penalty_rate'  => 'nullable|numeric|min:0',
-                'grace_period_days'     => 'nullable|integer|min:0|max:60',
+                'grace_period_days'     => 'nullable|integer|min:0',
                 'allow_early_repayment' => 'nullable|boolean',
             ]);
 
-            // Update or create the settings record
             $settings = Setting::firstOrCreate([]);
-            $settings->fill(array_filter($validated, fn($v) => !is_null($v)))->save();
+            $settings->fill(array_filter($validated))->save();
 
             ActivityLogger::log('Updated Settings', 'Settings updated by ' . Auth::user()->name);
 
-            // ✅ Flash message to Inertia frontend
             return back()->with('success', '✅ Settings updated successfully.');
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to update settings.');
         }
     }
 
-    /**
-     * ♻️ Reset all settings to default
-     */
+    /** ♻️ Reset Settings to Default Values */
     public function reset()
     {
         try {
-            $defaults = [
+            $settings = Setting::firstOrCreate([]);
+
+            $settings->fill([
                 'company_name'          => 'Joelaar Micro-Credit Services',
-                'address'               => 'Accra, Ghana',
-                'phone'                 => '+233000000000',
+                'address'               => 'Bolgatanga, Ghana',
                 'email'                 => 'support@joelaar.com',
-                'bank_name'             => 'GCB Bank',
-                'bank_account_number'   => '000123456789',
-                'manager_name'          => 'Super Admin',
-                'manager_title'         => 'Manager',
+                'phone'                 => '+233000000000',
+                'bank_name'             => 'Ghana Commercial Bank',
+                'bank_account_number'   => '0000000000',
+                'manager_name'          => 'Admin User',
+                'manager_title'         => 'System Administrator',
                 'default_interest_rate' => 20,
                 'default_term_months'   => 3,
                 'default_penalty_rate'  => 0.5,
                 'grace_period_days'     => 0,
                 'allow_early_repayment' => true,
-            ];
-
-            $settings = Setting::firstOrCreate([]);
-            $settings->fill($defaults)->save();
+            ])->save();
 
             ActivityLogger::log('Reset Settings', 'Settings reset by ' . Auth::user()->name);
 
@@ -121,16 +108,10 @@ class SettingsController extends Controller
         }
     }
 
-    /**
-     * 🧰 Unified Safe Error Handler
-     */
+    /** 🧰 Error Handler */
     private function handleError(\Throwable $e, string $message)
     {
         $user = auth()->user();
-        if ($user && strtolower($user->role ?? '') === 'superadmin') {
-            throw $e; // Let superadmin see full error
-        }
-
         Log::error('❌ SettingsController Error', [
             'user'  => $user?->email,
             'route' => request()->path(),

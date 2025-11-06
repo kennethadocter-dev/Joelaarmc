@@ -2,6 +2,8 @@ import React, { useState, useEffect, createContext, useContext } from "react";
 import Dropdown from "@/Components/Dropdown";
 import { Link, usePage } from "@inertiajs/react";
 import NProgress from "nprogress";
+import "nprogress/nprogress.css";
+import { motion, AnimatePresence } from "framer-motion";
 import {
     FaTachometerAlt,
     FaFileInvoiceDollar,
@@ -11,20 +13,20 @@ import {
     FaBars,
     FaUserPlus,
     FaChartLine,
-    FaTimes,
     FaChevronLeft,
     FaChevronRight,
 } from "react-icons/fa";
 
 /* ---------- NProgress Setup ---------- */
 NProgress.configure({ showSpinner: false });
-if (typeof window !== "undefined") {
+if (typeof window !== "undefined" && !window.__nprogressSetupDone) {
     document.addEventListener("inertia:start", () => NProgress.start());
     document.addEventListener("inertia:finish", () => NProgress.done());
     document.addEventListener("inertia:error", () => NProgress.done());
+    window.__nprogressSetupDone = true;
 }
 
-/* ---------- Global Confirm Modal Context ---------- */
+/* ---------- Confirm Modal Context ---------- */
 const ConfirmContext = createContext(null);
 export const useConfirm = () => useContext(ConfirmContext);
 
@@ -73,7 +75,7 @@ export default function AuthenticatedLayout({ header, children }) {
         "";
 
     const [sidebarOpen, setSidebarOpen] = useState(true);
-    const [mobileSidebar, setMobileSidebar] = useState(false);
+    const [loading, setLoading] = useState(false);
     const [confirmState, setConfirmState] = useState({
         show: false,
         title: "",
@@ -81,6 +83,22 @@ export default function AuthenticatedLayout({ header, children }) {
         type: "info",
         onConfirm: null,
     });
+
+    /* ---------- Global Loading State ---------- */
+    useEffect(() => {
+        const start = () => setLoading(true);
+        const finish = () => setTimeout(() => setLoading(false), 300);
+
+        window.addEventListener("inertia:start", start);
+        window.addEventListener("inertia:finish", finish);
+        window.addEventListener("inertia:error", finish);
+
+        return () => {
+            window.removeEventListener("inertia:start", start);
+            window.removeEventListener("inertia:finish", finish);
+            window.removeEventListener("inertia:error", finish);
+        };
+    }, []);
 
     /* ---------- Confirm Modal Handler ---------- */
     useEffect(() => {
@@ -108,13 +126,12 @@ export default function AuthenticatedLayout({ header, children }) {
             </div>
         );
 
+    const isSuperAdmin = user.is_super_admin || user.role === "superadmin";
     const isAdmin =
-        user.role === "admin" ||
-        user.role === "superadmin" ||
-        user.is_super_admin;
+        isSuperAdmin || user.role === "admin" || user.role === "staff";
 
     /* ---------- Sidebar Menu ---------- */
-    let menuItems = [
+    const adminMenu = [
         {
             name: "Dashboard",
             icon: <FaTachometerAlt />,
@@ -138,36 +155,60 @@ export default function AuthenticatedLayout({ header, children }) {
         { name: "Settings", icon: <FaCog />, route: `/${basePath}/settings` },
     ];
 
-    if (user.role === "superadmin") {
-        menuItems.push(
-            {
-                name: "Activity Log",
-                icon: <FaChartLine />,
-                route: "/superadmin/activity",
-            },
-            {
-                name: "Manage Users",
-                icon: <FaUserPlus />,
-                route: "/superadmin/users",
-            },
-            {
-                name: "System Control",
-                icon: <FaCog className="text-red-600" />,
-                route: "/superadmin/system",
-                danger: true,
-            },
-        );
-    }
+    const superAdminExtras = [
+        {
+            name: "Manage Users",
+            icon: <FaUserPlus />,
+            route: "/superadmin/users",
+        },
+        {
+            name: "Activity Log",
+            icon: <FaChartLine />,
+            route: "/superadmin/activity",
+        },
+        {
+            name: "System Control",
+            icon: <FaCog className="text-red-600" />,
+            route: "/superadmin/system",
+            danger: true,
+        },
+    ];
+
+    const menuItems = isSuperAdmin
+        ? [...adminMenu, ...superAdminExtras]
+        : adminMenu;
 
     const avatar = user?.profile_photo_url
         ? user.profile_photo_url
         : `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || "User")}&background=random`;
 
-    /* ---------- Layout ---------- */
+    const isDetailPage =
+        currentUrl.includes("/loans/") ||
+        currentUrl.includes("/customers/") ||
+        currentUrl.includes("/users/");
+
+    /* ---------- LAYOUT ---------- */
     return (
         <ConfirmContext.Provider value={() => {}}>
-            <div className="flex bg-gray-50 text-gray-900 min-h-screen overflow-hidden">
-                {/* ---------- STATIC SIDEBAR ---------- */}
+            <div className="flex bg-gray-50 text-gray-900 min-h-screen overflow-hidden relative">
+                {/* 🔄 Global Joelaar Overlay Loader */}
+                {loading && (
+                    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-blue-700 via-blue-500 to-blue-300 bg-opacity-80 backdrop-blur-sm">
+                        <div className="flex flex-col items-center">
+                            <img
+                                src="/images/logo.png"
+                                alt="Joelaar"
+                                className="h-16 w-auto animate-pulse drop-shadow-lg mb-4"
+                            />
+                            <div className="loader"></div>
+                            <p className="text-white mt-4 text-lg font-semibold tracking-wide">
+                                Loading, please wait...
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Sidebar */}
                 {isAdmin && (
                     <aside
                         className={`hidden md:flex flex-col transition-all duration-300 bg-white shadow-md border-r fixed left-0 top-0 bottom-0 z-40 ${
@@ -229,58 +270,19 @@ export default function AuthenticatedLayout({ header, children }) {
                     </aside>
                 )}
 
-                {/* ---------- MOBILE SIDEBAR ---------- */}
-                {isAdmin && mobileSidebar && (
-                    <div className="fixed inset-0 z-50 bg-black/50 md:hidden">
-                        <aside className="absolute left-0 top-0 h-full w-64 bg-white shadow-lg p-5 overflow-y-auto">
-                            <div className="flex justify-between items-center mb-5">
-                                <span className="font-bold text-lg">Menu</span>
-                                <button
-                                    onClick={() => setMobileSidebar(false)}
-                                    className="text-gray-600 hover:text-gray-900"
-                                >
-                                    <FaTimes size={22} />
-                                </button>
-                            </div>
-                            {menuItems.map((item) => (
-                                <Link
-                                    key={item.name}
-                                    href={item.route}
-                                    onClick={() => setMobileSidebar(false)}
-                                    className={`block py-2 px-3 rounded-md mb-2 ${
-                                        currentUrl.startsWith(item.route)
-                                            ? "bg-blue-100 text-blue-700"
-                                            : "text-gray-700 hover:bg-gray-100"
-                                    }`}
-                                >
-                                    {item.name}
-                                </Link>
-                            ))}
-                        </aside>
-                    </div>
-                )}
-
-                {/* ---------- MAIN CONTENT ---------- */}
+                {/* Main Content */}
                 <div
                     className={`flex flex-col flex-1 min-h-screen transition-all duration-300 ${
                         isAdmin ? (sidebarOpen ? "md:ml-64" : "md:ml-20") : ""
                     }`}
                 >
-                    {/* Top Navbar */}
-                    <nav className="border-b border-gray-200 bg-white fixed top-0 right-0 left-0 md:left-auto z-30">
-                        <div className="flex justify-between items-center px-4 sm:px-6 h-16">
-                            {isAdmin && (
-                                <button
-                                    className="md:hidden text-gray-600 hover:text-gray-900"
-                                    onClick={() => setMobileSidebar(true)}
-                                >
-                                    <FaBars size={20} />
-                                </button>
-                            )}
+                    {/* Navbar */}
+                    <nav className="border-b border-gray-200 bg-white fixed top-0 right-0 left-0 md:left-auto z-30 h-[3.2rem]">
+                        <div className="flex justify-between items-center px-4 sm:px-6 h-full">
                             <div className="flex items-center ml-auto">
                                 <Dropdown>
                                     <Dropdown.Trigger>
-                                        <button className="inline-flex items-center gap-2 rounded-md bg-white/80 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-100 hover:text-gray-900 transition-all duration-200">
+                                        <button className="inline-flex items-center gap-2 rounded-md bg-white/80 px-3 py-1 text-sm font-medium text-gray-800 hover:bg-gray-100 hover:text-gray-900 transition-all duration-200">
                                             <img
                                                 src={avatar}
                                                 alt="Avatar"
@@ -312,16 +314,23 @@ export default function AuthenticatedLayout({ header, children }) {
                         </div>
                     </nav>
 
-                    {/* Header Section */}
-                    {header && (
-                        <header className="bg-white shadow-sm px-4 sm:px-6 py-4 mt-16 sticky top-16 z-20">
-                            {header}
-                        </header>
-                    )}
+                    {/* Header + Animated Content */}
+                    <header className="bg-white shadow-sm px-4 sm:px-6 py-2 mt-[3.3rem] sticky top-[3.2rem] z-20">
+                        {header}
+                    </header>
 
-                    {/* Main Page Content */}
-                    <main className="flex-1 overflow-y-auto p-4 sm:p-6 mt-16">
-                        {children}
+                    <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={page.url}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.25 }}
+                            >
+                                {children}
+                            </motion.div>
+                        </AnimatePresence>
                     </main>
                 </div>
             </div>
@@ -340,3 +349,21 @@ export default function AuthenticatedLayout({ header, children }) {
         </ConfirmContext.Provider>
     );
 }
+
+/* 🔹 Custom Joelaar Loader Animation */
+const style = document.createElement("style");
+style.innerHTML = `
+.loader {
+  border: 5px solid rgba(255,255,255,0.3);
+  border-top: 5px solid #ffffff;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+`;
+document.head.appendChild(style);

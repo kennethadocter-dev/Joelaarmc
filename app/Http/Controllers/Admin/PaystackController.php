@@ -13,7 +13,11 @@ use App\Mail\PaymentReceiptMail;
 use PDF;
 use Carbon\Carbon;
 
-class PaymentController extends Controller
+/**
+ * 💳 Handles all Paystack payment processing:
+ * initialization, callback verification, receipts, and loan updates.
+ */
+class PaystackController extends Controller
 {
     /**
      * 💳 Step 1: Initialize Paystack Payment
@@ -30,14 +34,12 @@ class PaymentController extends Controller
 
             $amountInKobo = $validated['amount'] * 100;
 
-            // 🔁 Determine callback route dynamically
             $callbackRoute = match (true) {
                 auth()->user()?->is_super_admin,
                 auth()->user()?->role === 'superadmin' => 'superadmin.paystack.callback',
                 default => 'admin.paystack.callback',
             };
 
-            // 🧾 Initialize Paystack transaction
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
                 'Content-Type'  => 'application/json',
@@ -46,9 +48,9 @@ class PaymentController extends Controller
                 'amount'       => $amountInKobo,
                 'callback_url' => route($callbackRoute),
                 'metadata'     => [
-                    'loan_id'     => $validated['loan_id'] ?? null,
-                    'method'      => $validated['method'] ?? 'card',
-                    'initiated_by'=> auth()->user()?->name ?? 'System',
+                    'loan_id'      => $validated['loan_id'] ?? null,
+                    'method'       => $validated['method'] ?? 'card',
+                    'initiated_by' => auth()->user()?->name ?? 'System',
                 ],
             ]);
 
@@ -104,7 +106,6 @@ class PaymentController extends Controller
                 return redirect()->back()->with('error', '⚠️ Loan reference missing in transaction.');
             }
 
-            // 🧾 Prevent duplicate callbacks
             if (Payment::where('reference', $reference)->exists()) {
                 Log::info('⚠️ Duplicate Paystack callback ignored', ['reference' => $reference]);
                 return redirect()->route($this->loanRoute(), ['loan' => $loanId])
@@ -122,15 +123,14 @@ class PaymentController extends Controller
                 'received_by'    => auth()->id() ?? null,
             ]);
 
-            // 🧮 Update loan totals and schedules
             $loan = Loan::with('loanSchedules', 'customer')->find($loanId);
             if ($loan) {
-                $loan->amount_paid = ($loan->amount_paid ?? 0) + $amountPaid;
-                $loan->amount_remaining = max(0, ($loan->amount_remaining ?? 0) - $amountPaid);
+                $loan->amount_paid += $amountPaid;
+                $loan->amount_remaining = max(0, $loan->amount_remaining - $amountPaid);
                 $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
                 $loan->save();
 
-                // Distribute payment across schedules
+                // 🔁 Distribute across schedules
                 $remainingPayment = $amountPaid;
                 foreach ($loan->loanSchedules()->orderBy('payment_number')->get() as $schedule) {
                     if ($remainingPayment <= 0) break;
@@ -153,10 +153,7 @@ class PaymentController extends Controller
                     $schedule->save();
                 }
 
-                // Send confirmation receipt and SMS
                 $this->sendReceiptAndSms($loan, $payment, $amountPaid, $reference);
-            } else {
-                Log::error('⚠️ Loan not found during callback', ['loan_id' => $loanId]);
             }
 
             Log::info('✅ Paystack payment recorded', [
@@ -179,20 +176,17 @@ class PaymentController extends Controller
     private function sendReceiptAndSms($loan, $payment, $amountPaid, $reference)
     {
         try {
-            // 🧾 Generate PDF receipt
             $pdf = PDF::loadView('emails.payment_receipt', [
                 'loan'     => $loan,
                 'payment'  => $payment,
                 'customer' => $loan->customer,
             ]);
 
-            // 📧 Send receipt email
             if (!empty($loan->customer->email)) {
                 Mail::to($loan->customer->email)
                     ->send(new PaymentReceiptMail($loan, $payment, $pdf->output()));
             }
 
-            // 📱 Send SMS confirmation
             if (!empty($loan->customer->phone)) {
                 $smsMessage = "Hi {$loan->client_name}, your payment of ₵" .
                     number_format($amountPaid, 2) .
@@ -238,7 +232,7 @@ class PaymentController extends Controller
     private function handleError(\Throwable $e, string $message)
     {
         $user = auth()->user();
-        Log::error('❌ PaymentController Error', [
+        Log::error('❌ PaystackController Error', [
             'user'  => $user?->email ?? 'system',
             'route' => request()->path(),
             'error' => $e->getMessage(),

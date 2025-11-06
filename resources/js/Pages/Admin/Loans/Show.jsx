@@ -15,7 +15,6 @@ export default function LoanShow() {
     const user = auth?.user || {};
 
     useEffect(() => {
-        // ✅ show flash messages (from Record Payment redirect)
         if (flash?.success) toast.success(flash.success);
         if (flash?.error) toast.error(flash.error);
     }, [flash]);
@@ -45,21 +44,17 @@ export default function LoanShow() {
         }
     };
 
-    /** 💳 Pay with Paystack (only next unpaid schedule) */
+    /** 💳 Pay with Paystack (next unpaid schedule) */
     const handlePaystackPayment = async () => {
         const nextSchedule = loanSchedules.find((s) => !s.is_paid);
         const scheduleAmount = nextSchedule
             ? nextSchedule.amount_left || nextSchedule.amount
             : 0;
 
-        if (!nextSchedule) {
-            toast.error("All installments are already paid!");
-            return;
-        }
-        if (!scheduleAmount || scheduleAmount <= 0) {
-            toast.error("No unpaid installment amount found!");
-            return;
-        }
+        if (!nextSchedule)
+            return toast.error("All installments are already paid!");
+        if (!scheduleAmount || scheduleAmount <= 0)
+            return toast.error("No unpaid installment found!");
 
         toast.loading(
             `🔗 Initializing Paystack for ₵${Number(scheduleAmount).toFixed(2)}...`,
@@ -89,14 +84,12 @@ export default function LoanShow() {
             const data = await response.json();
             toast.dismiss();
 
-            if (data?.data?.authorization_url) {
+            if (data?.data?.authorization_url || data?.redirect_url) {
                 toast.success("✅ Redirecting to Paystack...");
-                window.location.href = data.data.authorization_url;
-            } else if (data?.redirect_url) {
-                toast.success("✅ Redirecting to Paystack...");
-                window.location.href = data.redirect_url;
+                window.location.href =
+                    data.data?.authorization_url || data.redirect_url;
             } else {
-                toast.error("⚠️ Failed to initialize Paystack payment.");
+                toast.error("⚠️ Failed to initialize Paystack.");
                 console.error("Paystack response:", data);
             }
         } catch (err) {
@@ -109,8 +102,17 @@ export default function LoanShow() {
     const actualPayments = [...(loan.payments || [])].sort(
         (a, b) => b.id - a.id,
     );
+    const isFullyPaid = (loan.amount_remaining ?? 0) <= 0;
 
-    const isFullyPaid = loan.amount_remaining <= 0;
+    // ✅ Derived values
+    const totalWithInterest =
+        loan.total_with_interest ??
+        loan.total_due ??
+        loan.amount + loan.interest_earned;
+    const progress =
+        totalWithInterest > 0
+            ? Math.min(((loan.amount_paid ?? 0) / totalWithInterest) * 100, 100)
+            : 0;
 
     return (
         <AuthenticatedLayout
@@ -133,9 +135,10 @@ export default function LoanShow() {
                     </Link>
                 </div>
 
-                {/* Summary */}
+                {/* ===================== SUMMARY CARD ===================== */}
                 <div className="bg-white rounded-xl shadow border border-gray-200 p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-                    <div className="space-y-2">
+                    {/* Client Info */}
+                    <div>
                         <h3 className="text-lg font-semibold text-gray-800 mb-3">
                             Client Info
                         </h3>
@@ -151,15 +154,25 @@ export default function LoanShow() {
                         </p>
                     </div>
 
-                    <div className="space-y-2">
+                    {/* Loan Details */}
+                    <div>
                         <h3 className="text-lg font-semibold text-gray-800 mb-3">
                             Loan Details
                         </h3>
                         <p>
-                            <strong>Amount:</strong> {money(loan.amount)}
+                            <strong>Principal:</strong> {money(loan.amount)}
                         </p>
                         <p>
-                            <strong>Interest:</strong> {loan.interest_rate}%
+                            <strong>Interest Rate:</strong> {loan.interest_rate}
+                            %
+                        </p>
+                        <p>
+                            <strong>Interest Earned:</strong>{" "}
+                            {money(loan.interest_earned)}
+                        </p>
+                        <p>
+                            <strong>Total w/ Interest:</strong>{" "}
+                            {money(totalWithInterest)}
                         </p>
                         <p>
                             <strong>Term:</strong> {loan.term_months} months
@@ -173,7 +186,8 @@ export default function LoanShow() {
                         </p>
                     </div>
 
-                    <div className="space-y-2">
+                    {/* Balance Summary */}
+                    <div>
                         <h3 className="text-lg font-semibold text-gray-800 mb-3">
                             Balance Summary
                         </h3>
@@ -195,16 +209,35 @@ export default function LoanShow() {
                                 {money(loan.amount_remaining ?? 0)}
                             </span>
                         </p>
+
+                        {/* ✅ Progress bar */}
+                        <div className="mt-3">
+                            <div className="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                                <span>Progress</span>
+                                <span>{progress.toFixed(1)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-3">
+                                <div
+                                    className={`h-3 rounded-full ${
+                                        isFullyPaid
+                                            ? "bg-green-500"
+                                            : "bg-blue-500"
+                                    }`}
+                                    style={{ width: `${progress}%` }}
+                                ></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
+                {/* ✅ Paid badge */}
                 {isFullyPaid && (
                     <div className="bg-green-50 border border-green-300 text-green-700 p-4 rounded-lg font-semibold">
                         🎉 This loan is fully paid.
                     </div>
                 )}
 
-                {/* Buttons */}
+                {/* ===================== ACTION BUTTONS ===================== */}
                 <div className="flex flex-wrap gap-3">
                     <Link
                         href={`/${basePath}/payments/create?loan_id=${loan.id}&redirect=${encodeURIComponent(
@@ -213,7 +246,7 @@ export default function LoanShow() {
                         disabled={isFullyPaid}
                         className={`inline-flex items-center justify-center px-5 py-2 rounded-md font-semibold transition ${
                             isFullyPaid
-                                ? "bg-gray-300 text-gray-500 cursor-not-allowed pointer-events-none"
+                                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                                 : "bg-green-600 text-white hover:bg-green-700"
                         }`}
                     >
@@ -233,11 +266,8 @@ export default function LoanShow() {
                     </button>
                 </div>
 
-                {/* Payment Schedule Table */}
-                <div
-                    id="payment-schedule"
-                    className="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto"
-                >
+                {/* ===================== PAYMENT SCHEDULE TABLE ===================== */}
+                <div className="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto">
                     <h3 className="text-lg font-semibold text-gray-800 px-6 py-3 border-b">
                         Payment Schedule
                     </h3>
@@ -249,8 +279,8 @@ export default function LoanShow() {
                                     "Month",
                                     "Due Date",
                                     "Expected Amount",
-                                    "Paid This Month",
-                                    "Remaining Balance",
+                                    "Paid",
+                                    "Remaining",
                                     "Status",
                                 ].map((h) => (
                                     <th
@@ -278,7 +308,7 @@ export default function LoanShow() {
                                         <td className="px-4 py-3 text-sm text-gray-700">
                                             {formatDate(s.due_date)}
                                         </td>
-                                        <td className="px-4 py-3 text-sm text-gray-700">
+                                        <td className="px-4 py-3 text-sm">
                                             {money(s.amount)}
                                         </td>
                                         <td className="px-4 py-3 text-sm text-green-700 font-semibold">
@@ -320,11 +350,8 @@ export default function LoanShow() {
                     </table>
                 </div>
 
-                {/* Payment History Table */}
-                <div
-                    id="payment-history"
-                    className="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto"
-                >
+                {/* ===================== PAYMENT HISTORY TABLE ===================== */}
+                <div className="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto">
                     <h3 className="text-lg font-semibold text-gray-800 px-6 py-3 border-b">
                         Payment History
                     </h3>

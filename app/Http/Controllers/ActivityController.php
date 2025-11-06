@@ -9,60 +9,55 @@ use App\Helpers\ActivityLogger;
 
 class ActivityController extends Controller
 {
+    private function basePath()
+    {
+        $u = auth()->user();
+        return ($u && ($u->is_super_admin || $u->role === 'superadmin'))
+            ? 'superadmin'
+            : 'admin';
+    }
+
     public function __construct()
     {
         $this->middleware(['auth']);
     }
 
-    /**
-     * 📋 Show all activity logs (admin + superadmin)
-     */
+    /** 📋 Show logs */
     public function index(Request $request)
     {
         $user = auth()->user();
-
         if (!in_array($user->role, ['admin', 'superadmin', 'superuser'])) {
-            abort(403, 'Access denied. Only administrators can view activity logs.');
+            abort(403, 'Access denied.');
         }
 
         $search = $request->query('q');
-
-        // ✅ Load logs with related user info (name + email)
         $logs = ActivityLog::with('user:id,name,email')
             ->when($search, function ($q) use ($search) {
                 $q->where('action', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%")
-                    ->orWhereHas('user', function ($sub) use ($search) {
-                        $sub->where('name', 'like', "%{$search}%")
-                            ->orWhere('email', 'like', "%{$search}%");
-                    });
+                  ->orWhere('description', 'like', "%{$search}%");
             })
             ->latest()
             ->paginate(30)
             ->withQueryString();
 
-        return Inertia::render('ActivityLog/Index', [
+        return Inertia::render(ucfirst($this->basePath()) . '/ActivityLog/Index', [
             'logs'    => $logs,
             'filters' => ['q' => $search],
             'auth'    => ['user' => $user],
+            'basePath'=> $this->basePath(),
         ]);
     }
 
-    /**
-     * 🧹 Clear all logs (admin + superadmin)
-     */
+    /** 🧹 Clear all logs */
     public function clear()
     {
         $user = auth()->user();
-
         if (!in_array($user->role, ['admin', 'superadmin', 'superuser'])) {
-            abort(403, 'Access denied. Only administrators can clear logs.');
+            abort(403, 'Access denied.');
         }
 
         ActivityLog::truncate();
-
-        ActivityLogger::log('Cleared Activity Logs', "All activity logs cleared by {$user->name}");
-
-        return back()->with('success', '✅ All activity logs cleared successfully.');
+        ActivityLogger::log('Cleared Activity Logs', "Cleared by {$user->name}");
+        return back()->with('success', '✅ Logs cleared.');
     }
 }

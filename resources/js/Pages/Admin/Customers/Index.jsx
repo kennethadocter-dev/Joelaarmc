@@ -2,6 +2,7 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useEffect, useState, useRef } from "react";
 import { printSection } from "@/utils/printSection";
+import { route } from "ziggy-js"; // ✅ Corrected import
 
 export default function CustomersIndex() {
     const {

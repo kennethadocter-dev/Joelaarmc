@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 
 class Loan extends Model
 {
@@ -25,6 +24,7 @@ class Loan extends Model
         'notes',
         'disbursed_at',
         'interest_earned',
+        'total_with_interest', // ✅ added for controller consistency
     ];
 
     protected $casts = [
@@ -36,7 +36,12 @@ class Loan extends Model
         'amount_paid'       => 'decimal:2',
         'amount_remaining'  => 'decimal:2',
         'interest_earned'   => 'decimal:2',
+        'total_with_interest' => 'decimal:2',
     ];
+
+    /* =======================================================
+       🔗 RELATIONSHIPS
+       ======================================================= */
 
     /** 👤 Staff member who created the loan */
     public function user(): BelongsTo
@@ -68,39 +73,52 @@ class Loan extends Model
         return $this->hasMany(LoanSchedule::class, 'loan_id')->orderBy('payment_number');
     }
 
+    /* =======================================================
+       ⚙️ CORE LOGIC
+       ======================================================= */
+
     /**
      * 🔁 Recalculate totals and update loan status accurately.
      * Ensures new loans start as pending/active and only become "paid" when fully cleared.
      */
     public function recalcStatusAndSave(): void
-{
-    $totalPaid = $this->loanSchedules()->sum('amount_paid');
-    $totalLeft = $this->loanSchedules()->sum('amount_left');
+    {
+        $totalPaid = $this->loanSchedules()->sum('amount_paid');
+        $totalLeft = $this->loanSchedules()->sum('amount_left');
 
-    // 🧮 Normalize small rounding issues (e.g., 0.009 ≈ 0)
-    if ($totalLeft < 0.05) {
-        $totalLeft = 0;
+        // 🧮 Normalize small rounding issues (e.g., 0.009 ≈ 0)
+        if ($totalLeft < 0.05) {
+            $totalLeft = 0;
+        }
+
+        $this->amount_paid = round($totalPaid, 2);
+        $this->amount_remaining = round($totalLeft, 2);
+
+        // ✅ Use consistent rules
+        if ($this->amount_remaining <= 0) {
+            $this->status = 'paid';
+        } elseif (in_array($this->status, ['pending', 'draft'])) {
+            $this->status = 'active';
+        }
+
+        $this->save();
     }
 
-    $this->amount_paid = round($totalPaid, 2);
-    $this->amount_remaining = round($totalLeft, 2);
-
-    if ($this->amount_remaining <= 0) {
-        $this->status = 'paid';
-    } elseif ($this->status === 'pending') {
-        $this->status = 'active';
-    }
-
-    $this->save();
-}
+    /* =======================================================
+       🧮 COMPUTED ATTRIBUTES
+       ======================================================= */
 
     /** 💰 Total amount due (principal + interest) */
     public function getTotalDueAttribute(): float
     {
-        $amount = (float) ($this->amount ?? 0);
-        $interestRate = (float) ($this->interest_rate ?? 0);
+        if ($this->total_with_interest) {
+            return (float) $this->total_with_interest;
+        }
 
-        return $amount + ($amount * $interestRate / 100);
+        $amount = (float) ($this->amount ?? 0);
+        $interestEarned = (float) ($this->interest_earned ?? 0);
+
+        return round($amount + $interestEarned, 2);
     }
 
     /** 📆 Monthly installment value */
@@ -108,6 +126,33 @@ class Loan extends Model
     {
         return $this->term_months > 0
             ? round($this->total_due / $this->term_months, 2)
-            : 0;
+            : 0.00;
+    }
+
+    /** 💵 Percentage progress of payment */
+    public function getProgressAttribute(): float
+    {
+        $total = $this->total_due > 0 ? $this->total_due : 1;
+        return round(($this->amount_paid / $total) * 100, 1);
+    }
+
+    /** 📊 Human-readable loan status label */
+    public function getStatusLabelAttribute(): string
+    {
+        return match ($this->status) {
+            'pending' => '⏳ Pending',
+            'active'  => '🟢 Active',
+            'paid'    => '✅ Paid',
+            'overdue' => '🔴 Overdue',
+            default   => ucfirst($this->status ?? 'Unknown'),
+        };
+    }
+
+    /** 📅 Time left or overdue info */
+    public function getDaysUntilDueAttribute(): ?string
+    {
+        if (!$this->due_date) return null;
+        $days = now()->diffInDays(Carbon::parse($this->due_date), false);
+        return $days >= 0 ? "{$days} days left" : abs($days) . " days overdue";
     }
 }

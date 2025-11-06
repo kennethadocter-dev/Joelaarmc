@@ -21,11 +21,11 @@ export default function LoanCreate() {
     // ✅ Automatically load interest rate from settings (defaults)
     const interestRateFromSettings = defaults?.interest_rate ?? 20;
 
-    const { data, setData, post, processing, errors, reset } = useForm({
+    const { data, setData, post, processing, errors } = useForm({
         customer_id: prefill_customer_id || urlParams.get("customer_id") || "",
         client_name: prefill_client_name || "",
         amount: prefillAmount || "",
-        interest_rate: interestRateFromSettings, // ✅ pulled directly
+        interest_rate: interestRateFromSettings,
         term_months: "",
         start_date: new Date().toISOString().split("T")[0],
         due_date: "",
@@ -45,7 +45,7 @@ export default function LoanCreate() {
         }
     }, [flash]);
 
-    // ✅ Auto calculate due date
+    // ✅ Auto-calculate due date
     useEffect(() => {
         if (data.start_date && data.term_months) {
             const start = new Date(data.start_date);
@@ -55,38 +55,40 @@ export default function LoanCreate() {
         }
     }, [data.start_date, data.term_months]);
 
-    // ✅ Loan Calculation
-    const { paymentSchedule, totalPayable } = useMemo(() => {
-        const months = Number(data.term_months || 0);
-        const amount = Number(data.amount || 0);
+    // ✅ Loan Calculation (safe + accurate)
+    const { paymentSchedule, totalPayable, monthlyPayment } = useMemo(() => {
+        const months = Number(data.term_months) || 0;
+        const amount = Number(data.amount) || 0;
+        const rate = Number(data.interest_rate) || 0;
+        const startDate = data.start_date
+            ? new Date(data.start_date)
+            : new Date();
 
-        if (!amount || !months) return { paymentSchedule: [], totalPayable: 0 };
+        if (months <= 0 || amount <= 0) {
+            return { paymentSchedule: [], totalPayable: 0, monthlyPayment: 0 };
+        }
 
-        const rates = {
-            1: 1.2,
-            2: 0.655,
-            3: 0.475,
-            4: 0.39,
-            5: 0.335,
-            6: 0.305,
-        };
+        // 🔹 Calculate total payable with simple interest
+        const total = amount * (1 + (rate / 100) * (months / 12));
+        const monthly = total / months;
 
-        const multiplier = rates[months] || 1.2;
-        const monthlyPayment = amount * multiplier;
-        const total = monthlyPayment * months;
-
+        // 🔹 Build schedule
         const schedule = Array.from({ length: months }, (_, i) => {
-            const date = new Date(data.start_date);
-            date.setMonth(date.getMonth() + (i + 1));
+            const dueDate = new Date(startDate);
+            dueDate.setMonth(startDate.getMonth() + (i + 1));
             return {
                 month: i + 1,
-                amount_payable: monthlyPayment.toFixed(2),
-                due_date: date.toISOString().split("T")[0],
+                amount_payable: monthly.toFixed(2),
+                due_date: dueDate.toISOString().split("T")[0],
             };
         });
 
-        return { paymentSchedule: schedule, totalPayable: total };
-    }, [data.amount, data.term_months, data.start_date]);
+        return {
+            paymentSchedule: schedule,
+            totalPayable: total,
+            monthlyPayment: monthly,
+        };
+    }, [data.amount, data.interest_rate, data.term_months, data.start_date]);
 
     // ✅ Submit
     const submit = (e) => {
@@ -143,7 +145,7 @@ export default function LoanCreate() {
                     </Link>
                 </div>
 
-                {/* 🧾 Loan Form Card */}
+                {/* 🧾 Loan Form */}
                 <form
                     onSubmit={submit}
                     className="bg-white shadow-xl rounded-lg p-6 space-y-6 border border-gray-200 transition hover:shadow-2xl duration-200"
@@ -174,7 +176,6 @@ export default function LoanCreate() {
                             required
                         />
 
-                        {/* ✅ Interest Rate - Auto from settings, not editable */}
                         <Field
                             label="Interest Rate (%)"
                             type="number"
@@ -182,7 +183,7 @@ export default function LoanCreate() {
                             setValue={(v) => setData("interest_rate", v)}
                             error={errors.interest_rate}
                             required
-                            disabled // ✅ read-only
+                            disabled // read-only from settings
                         />
 
                         <div>
@@ -229,6 +230,7 @@ export default function LoanCreate() {
                             error={errors.start_date}
                             required
                         />
+
                         <Field
                             label="Due Date"
                             type="date"
@@ -300,9 +302,14 @@ export default function LoanCreate() {
                                 </table>
                             </div>
 
-                            <div className="flex justify-end mt-4">
-                                <div className="bg-green-50 border border-green-500 text-green-700 font-bold px-6 py-3 rounded-lg shadow-sm">
+                            {/* 💰 Totals */}
+                            <div className="flex flex-col md:flex-row justify-end mt-4 gap-3 text-right">
+                                <div className="bg-green-50 border border-green-500 text-green-700 font-semibold px-6 py-3 rounded-lg shadow-sm">
                                     Total Payable (₵): {totalPayable.toFixed(2)}
+                                </div>
+                                <div className="bg-blue-50 border border-blue-500 text-blue-700 font-semibold px-6 py-3 rounded-lg shadow-sm">
+                                    Monthly Payment (₵):{" "}
+                                    {monthlyPayment.toFixed(2)}
                                 </div>
                             </div>
                         </div>

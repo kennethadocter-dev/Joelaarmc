@@ -20,14 +20,14 @@ class UserController extends Controller
         // ✅ Allow only admin roles to access user management
         $this->middleware(function ($request, $next) {
             $user = auth()->user();
-            if (!in_array($user->role, ['admin', 'superadmin', 'superuser'])) {
+            if (!in_array($user->role, ['admin', 'superadmin'])) {
                 abort(403, 'Access denied. Only administrators can manage users.');
             }
             return $next($request);
         });
     }
 
-    /** 🔁 Dynamic redirect based on user role */
+    /** 🔁 Redirect path based on user role */
     private function redirectToIndex()
     {
         $user = auth()->user();
@@ -36,7 +36,7 @@ class UserController extends Controller
             : 'admin.users.index';
     }
 
-    /** 📋 List users */
+    /** 📋 List all users */
     public function index(Request $request)
     {
         try {
@@ -68,7 +68,7 @@ class UserController extends Controller
             $counts = [
                 'super_admin' => User::where('role', 'superadmin')->count(),
                 'admin'       => User::where('role', 'admin')->count(),
-                'officer'     => User::where('role', 'staff')->count(),
+                'staff'       => User::where('role', 'staff')->count(),
                 'user'        => User::where('role', 'user')->count(),
             ];
 
@@ -86,7 +86,7 @@ class UserController extends Controller
         }
     }
 
-    /** ➕ Show create form */
+    /** ➕ Create user form */
     public function create()
     {
         try {
@@ -100,18 +100,25 @@ class UserController extends Controller
     public function store(Request $request)
     {
         try {
+            $current = auth()->user();
+
+            // ✅ Allow superadmin to create any role
+            $allowedRoles = $current->role === 'superadmin'
+                ? ['superadmin', 'admin', 'staff', 'user']
+                : ['staff', 'user'];
+
             $validated = $request->validate([
                 'name'     => 'required|string|max:255',
                 'email'    => 'nullable|email|unique:users,email',
                 'phone'    => ['nullable', 'regex:/^(0|233)\d{9}$/'],
-                'role'     => 'required|in:admin,staff,user',
+                'role'     => 'required|in:' . implode(',', $allowedRoles),
                 'password' => 'nullable|string|min:6|confirmed',
             ]);
 
             $plainPassword = $validated['password'] ?? Str::random(8);
             $validated['password'] = bcrypt($plainPassword);
 
-            // ☎️ Normalize Ghana phone
+            // ☎️ Normalize Ghana phone number
             if (!empty($validated['phone'])) {
                 $phone = preg_replace('/\D/', '', $validated['phone']);
                 if (str_starts_with($phone, '0')) {
@@ -123,7 +130,7 @@ class UserController extends Controller
 
             $user = User::create($validated);
 
-            ActivityLogger::log('Created User', "User {$user->name} ({$user->role}) created by " . auth()->user()->name);
+            ActivityLogger::log('Created User', "User {$user->name} ({$user->role}) created by " . $current->name);
 
             // 🔔 Notify via Email & SMS
             try {
@@ -159,22 +166,30 @@ class UserController extends Controller
         }
     }
 
-    /** 💾 Update user info + send new credentials if password changed */
+    /** 💾 Update user info */
     public function update(Request $request, User $user)
     {
         try {
-            if ($user->role === 'superadmin' && auth()->id() !== $user->id) {
+            $current = auth()->user();
+
+            // Prevent editing Superadmin unless you are Superadmin
+            if ($user->role === 'superadmin' && $current->role !== 'superadmin') {
                 return back()->with('error', '⚠️ You cannot modify the Superadmin account.');
             }
+
+            $allowedRoles = $current->role === 'superadmin'
+                ? ['superadmin', 'admin', 'staff', 'user']
+                : ['staff', 'user'];
 
             $validated = $request->validate([
                 'name'     => 'required|string|max:255',
                 'email'    => 'nullable|email|unique:users,email,' . $user->id,
                 'phone'    => ['nullable', 'regex:/^(0|233)\d{9}$/'],
-                'role'     => 'required|in:admin,staff,user',
+                'role'     => 'required|in:' . implode(',', $allowedRoles),
                 'password' => 'nullable|string|min:6|confirmed',
             ]);
 
+            // ☎️ Normalize phone
             if (!empty($validated['phone'])) {
                 $phone = preg_replace('/\D/', '', $validated['phone']);
                 if (str_starts_with($phone, '0')) {
@@ -194,7 +209,7 @@ class UserController extends Controller
 
             $user->update($validated);
 
-            ActivityLogger::log('Updated User', "User {$user->name} updated by " . auth()->user()->name);
+            ActivityLogger::log('Updated User', "User {$user->name} updated by " . $current->name);
 
             if ($newPassword) {
                 try {
@@ -211,11 +226,11 @@ class UserController extends Controller
                     }
 
                     return redirect()->route($this->redirectToIndex())
-                        ->with('success', '✅ User updated and new login credentials sent.');
+                        ->with('success', '✅ User updated and new credentials sent.');
                 } catch (\Throwable $e) {
                     Log::error('❌ Failed to send password update message', ['error' => $e->getMessage()]);
                     return redirect()->route($this->redirectToIndex())
-                        ->with('error', '⚠️ User updated but failed to send new password.');
+                        ->with('error', '⚠️ User updated but failed to send password email/SMS.');
                 }
             }
 
@@ -244,7 +259,7 @@ class UserController extends Controller
         }
     }
 
-    /** 🔁 Re-send login credentials via Email & SMS */
+    /** 🔁 Re-send login credentials */
     public function resendCredentials(User $user)
     {
         try {

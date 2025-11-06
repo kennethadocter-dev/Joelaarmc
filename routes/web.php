@@ -9,11 +9,10 @@ use Illuminate\Support\Facades\Route;
 */
 
 // ===============================================================
-// ✅ ADMIN CONTROLLERS (in app/Http/Controllers/Admin)
+// ✅ ADMIN CONTROLLERS
 // ===============================================================
 use App\Http\Controllers\Admin\CustomerController;
 use App\Http\Controllers\Admin\LoanController;
-use App\Http\Controllers\Admin\ClauseController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\SystemController;
 use App\Http\Controllers\Admin\SettingsController;
@@ -21,7 +20,7 @@ use App\Http\Controllers\Admin\ReportsController;
 use App\Http\Controllers\Admin\PaymentController;
 
 // ===============================================================
-// ✅ SHARED CONTROLLERS (global in app/Http/Controllers)
+// ✅ SHARED CONTROLLERS
 // ===============================================================
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
@@ -33,22 +32,20 @@ use App\Http\Controllers\ActivityController;
 |--------------------------------------------------------------------------
 */
 
-// 🏠 Redirect dashboard alias
-Route::get('/dashboard', fn() => redirect()->route('dashboard.redirect'))->name('dashboard');
-
-// 🏠 Root route — redirect logged users
+// 🏠 Root redirect
 Route::get('/', fn() => auth()->check()
     ? redirect()->route('dashboard.redirect')
     : redirect()->route('login'));
+
+// 🏠 Dashboard alias
+Route::get('/dashboard', fn() => redirect()->route('dashboard.redirect'))->name('dashboard');
 
 /* ========================================================================
    🔐 AUTHENTICATED ROUTES
    ======================================================================== */
 Route::middleware(['auth'])->group(function () {
 
-    /* --------------------------------------------------------------------
-       🎯 Smart redirect based on user role
-       -------------------------------------------------------------------- */
+    /* 🎯 Smart redirect based on user role */
     Route::get('/dashboard-redirect', function () {
         $user = auth()->user();
 
@@ -92,21 +89,23 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('loans', LoanController::class)->names('admin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('admin.loans.activate');
 
-        // 💵 Payments (Full-page Record Payment)
+        // 💵 Payments
         Route::get('/payments/create', [PaymentController::class, 'create'])->name('admin.payments.create');
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('admin.payments.store');
         Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('admin.loans.recordPayment');
-
-        // 🧾 Receipts
         Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])->name('admin.loans.viewReceipt');
 
-        // ⚙️ Settings / System
+        // 📊 Reports (shared)
+        Route::get('/reports', [ReportsController::class, 'index'])->name('admin.reports.index');
+        Route::get('/reports/{id}', [ReportsController::class, 'show'])->name('admin.reports.show');
+        Route::post('/reports/{id}/send-agreement', [ReportsController::class, 'sendAgreement'])->name('admin.reports.sendAgreement');
+        Route::post('/reports/clear-failures', [ReportsController::class, 'clearEmailFailures'])->name('admin.reports.clearEmailFailures');
+
+        // ⚙️ Settings (shared)
         Route::get('/settings', [SettingsController::class, 'index'])->name('admin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('admin.settings.update');
-        Route::get('/system', [SystemController::class, 'index'])->name('admin.system.index');
-        Route::post('/system/backup', [SystemController::class, 'backupData'])->name('admin.system.backup');
 
-        // 💳 Paystack Integration
+        // 💳 Paystack (future use)
         Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('admin.paystack.initialize');
         Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('admin.paystack.callback');
     });
@@ -120,8 +119,10 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('superadmin.dashboard');
         Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('superadmin.dashboard.loansByYear');
 
-        // 👥 Users & Customers
+        // 👥 Manage Users
         Route::resource('users', UserController::class)->names('superadmin.users');
+
+        // 👥 Customers
         Route::get('/customers/search', [CustomerController::class, 'search'])->name('superadmin.customers.search');
         Route::resource('customers', CustomerController::class)->names('superadmin.customers');
 
@@ -129,27 +130,45 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('loans', LoanController::class)->names('superadmin.loans');
         Route::post('/loans/{loan}/activate', [LoanController::class, 'activate'])->name('superadmin.loans.activate');
 
-        // 💵 Payments (Full-page Record Payment)
+        // 💵 Payments (added ✅)
         Route::get('/payments/create', [PaymentController::class, 'create'])->name('superadmin.payments.create');
         Route::post('/payments/store', [PaymentController::class, 'store'])->name('superadmin.payments.store');
         Route::post('/loans/{loan}/record-payment', [PaymentController::class, 'store'])->name('superadmin.loans.recordPayment');
-
-        // 🧾 Receipts
         Route::get('/loans/{loan}/receipt/{payment}', [PaymentController::class, 'viewReceipt'])->name('superadmin.loans.viewReceipt');
 
-        // ⚙️ Settings / System
+        // 📊 Reports
+        Route::get('/reports', [ReportsController::class, 'index'])->name('superadmin.reports.index');
+        Route::get('/reports/{id}', [ReportsController::class, 'show'])->name('superadmin.reports.show');
+        Route::post('/reports/{id}/send-agreement', [ReportsController::class, 'sendAgreement'])->name('superadmin.reports.sendAgreement');
+        Route::post('/reports/clear-failures', [ReportsController::class, 'clearEmailFailures'])->name('superadmin.reports.clearEmailFailures');
+
+        // ⚙️ System Control (superadmin only)
+        Route::get('/system', [SystemController::class, 'index'])->name('superadmin.system.index');
+        Route::post('/system/backup', [SystemController::class, 'backupData'])->name('superadmin.system.backup')->withoutMiddleware([\Inertia\Middleware::class]);
+        Route::get('/system/list-backups', [SystemController::class, 'listBackups'])->name('superadmin.system.listBackups')->withoutMiddleware([\Inertia\Middleware::class]);
+        Route::delete('/system/delete-backup/{file}', [SystemController::class, 'deleteBackup'])
+            ->where('file', '.*')
+            ->name('superadmin.system.deleteBackup')
+            ->withoutMiddleware([\Inertia\Middleware::class]);
+        Route::post('/system/restore', [SystemController::class, 'restoreData'])->name('superadmin.system.restore')->withoutMiddleware([\Inertia\Middleware::class]);
+        Route::post('/system/reset', [SystemController::class, 'resetData'])->name('superadmin.system.reset')->withoutMiddleware([\Inertia\Middleware::class]);
+        Route::get('/system/preview-reset', [SystemController::class, 'previewReset'])->name('superadmin.system.previewReset')->withoutMiddleware([\Inertia\Middleware::class]);
+        Route::get('/system/download/{file}', [SystemController::class, 'downloadBackup'])
+            ->where('file', '.*')
+            ->name('superadmin.system.download');
+        Route::post('/system/upload', [SystemController::class, 'uploadBackup'])->name('superadmin.system.upload')->withoutMiddleware([\Inertia\Middleware::class]);
+
+        // ⚙️ Settings (shared)
         Route::get('/settings', [SettingsController::class, 'index'])->name('superadmin.settings.index');
         Route::put('/settings', [SettingsController::class, 'update'])->name('superadmin.settings.update');
-        Route::get('/system', [SystemController::class, 'index'])->name('superadmin.system.index');
-        Route::post('/system/backup', [SystemController::class, 'backupData'])->name('superadmin.system.backup');
-
-        // 💳 Paystack Integration
-        Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('superadmin.paystack.initialize');
-        Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('superadmin.paystack.callback');
 
         // 🧾 Activity Logs
         Route::get('/activity', [ActivityController::class, 'index'])->name('superadmin.activity');
         Route::delete('/activity/clear', [ActivityController::class, 'clear'])->name('superadmin.activity.clear');
+
+        // 💳 Paystack (future use)
+        Route::post('/paystack/initialize', [PaymentController::class, 'initialize'])->name('superadmin.paystack.initialize');
+        Route::get('/paystack/callback', [PaymentController::class, 'callback'])->name('superadmin.paystack.callback');
     });
 
     /* ====================================================================
@@ -161,11 +180,11 @@ Route::middleware(['auth'])->group(function () {
 });
 
 /* ========================================================================
-   🔍 CSRF CHECK (for debugging)
+   🔍 CSRF CHECK
    ======================================================================== */
 Route::get('/csrf-check', fn() => response()->json(['csrf' => csrf_token()]));
 
 /* ========================================================================
-   🔐 AUTH ROUTES (login / logout)
+   🔐 AUTH ROUTES
    ======================================================================== */
 require __DIR__ . '/auth.php';

@@ -3,7 +3,11 @@ import { Head, useForm, usePage, Link } from "@inertiajs/react";
 import { useState } from "react";
 
 export default function CreateUser() {
-    const { basePath = "admin" } = usePage().props;
+    const { auth, basePath: propBase = "admin" } = usePage().props;
+
+    // ✅ Automatically pick correct base path
+    const basePath =
+        auth?.user?.role === "superadmin" ? "superadmin" : propBase;
 
     const { data, setData, post, processing, errors, reset } = useForm({
         name: "",
@@ -34,10 +38,11 @@ export default function CreateUser() {
                 setToastColor("bg-green-600");
                 setTimeout(() => setToast(null), 2500);
             },
-            onError: () => {
-                setToast("⚠️ Failed to create user.");
+            onError: (errors) => {
+                const firstError = Object.values(errors)[0];
+                setToast(`⚠️ ${firstError || "Failed to create user."}`);
                 setToastColor("bg-red-600");
-                setTimeout(() => setToast(null), 2500);
+                setTimeout(() => setToast(null), 3000);
             },
         });
     };
@@ -185,10 +190,15 @@ export default function CreateUser() {
                             value={data.role}
                             onChange={(e) => setData("role", e.target.value)}
                             className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900 focus:ring-blue-500 focus:border-blue-500"
+                            required
                         >
                             <option value="user">User</option>
                             <option value="staff">Staff</option>
                             <option value="admin">Admin</option>
+                            {/* ✅ Allow Superadmin to create Superadmins */}
+                            {auth?.user?.role === "superadmin" && (
+                                <option value="superadmin">Superadmin</option>
+                            )}
                         </select>
                         {errors.role && (
                             <p className="text-red-500 text-sm mt-1">
