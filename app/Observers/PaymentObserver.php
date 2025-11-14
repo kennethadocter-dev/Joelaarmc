@@ -3,14 +3,16 @@
 namespace App\Observers;
 
 use App\Models\Payment;
-use Illuminate\Support\Facades\DB;
+use App\Models\Loan;
+use App\Models\LoanSchedule;
+use App\Models\Customer;
 use Illuminate\Support\Facades\Log;
-use App\Helpers\SmsNotifier; // ✅ Added
+use App\Helpers\SmsNotifier;
 
 class PaymentObserver
 {
     /**
-     * When a payment is created, distribute it across loan schedules.
+     * 🔹 When a payment is created, apply it automatically.
      */
     public function created(Payment $payment): void
     {
@@ -18,114 +20,75 @@ class PaymentObserver
     }
 
     /**
-     * Main logic for applying a payment and updating balances.
+     * 🧮 Core logic — distributes payment across schedules + updates loan and customer.
      */
     private function applyPayment(Payment $payment): void
     {
         try {
-            $loanId = $payment->loan_id;
-            $amount = (float) $payment->amount;
+            $loan = Loan::with(['loanSchedules', 'customer'])->find($payment->loan_id);
 
-            if (!$loanId || $amount <= 0) return;
-
-            // 🔹 Get the loan
-            $loan = DB::table('loans')->where('id', $loanId)->first();
             if (!$loan) {
-                Log::warning('⚠️ Loan not found for payment', ['payment_id' => $payment->id]);
+                Log::warning('⚠️ Loan not found for PaymentObserver', ['payment_id' => $payment->id]);
                 return;
             }
 
-            // 🔹 Get all schedules in order
-            $schedules = DB::table('loan_schedules')
-                ->where('loan_id', $loanId)
-                ->orderBy('payment_number')
-                ->get();
-
-            $remainingToApply = $amount;
+            $amountRemaining = (float) $payment->amount;
+            $schedules = $loan->loanSchedules()->orderBy('payment_number')->get();
 
             foreach ($schedules as $schedule) {
-                if ($remainingToApply <= 0) break;
+                if ($amountRemaining <= 0.00) break;
 
-                $alreadyPaid = (float) $schedule->amount_paid;
-                $totalDueForThis = (float) $schedule->amount;
-                $remainingThis = max($totalDueForThis - $alreadyPaid, 0);
+                $remainingForThis = $schedule->amount - $schedule->amount_paid;
+                if ($remainingForThis <= 0.01) continue;
 
-                // Skip cleared ones
-                if ($remainingThis <= 0.009) continue;
-
-                // Apply portion to this schedule
-                $apply = min($remainingToApply, $remainingThis);
-                $newPaid = $alreadyPaid + $apply;
-                $newRemaining = max($totalDueForThis - $newPaid, 0);
-
-                // Deduct applied from remaining to apply
-                $remainingToApply -= $apply;
-
-                // Determine status/note
-                $statusNote = $newRemaining <= 0.009
+                $apply = min($amountRemaining, $remainingForThis);
+                $schedule->amount_paid += $apply;
+                $schedule->amount_left = max(0, $schedule->amount - $schedule->amount_paid);
+                $schedule->is_paid = $schedule->amount_left <= 0.01;
+                $schedule->note = $schedule->is_paid
                     ? 'Cleared ✅'
-                    : 'Partial — ₵' . number_format($newRemaining, 2) . ' left';
+                    : 'Partial — ₵' . number_format($schedule->amount_left, 2) . ' left';
+                $schedule->save();
 
-                // Update the schedule
-                DB::table('loan_schedules')
-                    ->where('id', $schedule->id)
-                    ->update([
-                        'amount_paid' => round($newPaid, 2),
-                        'remaining_amount' => round($newRemaining, 2),
-                        'is_paid' => $newRemaining <= 0.009 ? 1 : 0,
-                        'note' => $statusNote,
-                        'paid_at' => $newRemaining <= 0.009 ? now() : $schedule->paid_at,
-                        'updated_at' => now(),
-                    ]);
+                $amountRemaining -= $apply;
             }
 
-            // 🧮 Update overall loan totals
-            $totalPaid = (float) DB::table('payments')->where('loan_id', $loanId)->sum('amount');
-            $totalWithInterest = (float) ($loan->amount + ($loan->amount * ($loan->interest_rate ?? 0) / 100));
-            $remainingLoan = max($totalWithInterest - $totalPaid, 0);
+            // 🔁 Recalculate the loan totals and status (auto triggers from LoanSchedule observer)
+            $loan->refresh();
+            $loan->update([
+                'amount_paid' => $loan->loanSchedules()->sum('amount_paid'),
+                'amount_remaining' => $loan->loanSchedules()->sum('amount_left'),
+            ]);
 
-            // 🔍 Check if all schedules are fully paid
-            $pendingCount = DB::table('loan_schedules')
-                ->where('loan_id', $loanId)
-                ->where('is_paid', 0)
-                ->count();
+            // ✅ LoanObserver will update status, expected interest, and customer totals automatically
+            $loan->touch();
 
-            // Update the loan master record
-            DB::table('loans')
-                ->where('id', $loanId)
-                ->update([
-                    'amount_paid' => round($totalPaid, 2),
-                    'amount_remaining' => round($remainingLoan, 2),
-                    'status' => ($pendingCount === 0 || $remainingLoan <= 0.009) ? 'paid' : 'active',
-                    'updated_at' => now(),
-                ]);
-
-            // ✅ 📨 SMS Notifications
-            $customer = DB::table('customers')->where('id', $loan->customer_id ?? null)->first();
+            // 📨 SMS Notifications
+            $customer = $loan->customer;
             if ($customer && !empty($customer->phone)) {
-                // 🔹 Notify about payment received
-                $msg = "Hi {$customer->full_name}, payment of ₵" . number_format($amount, 2) .
-                    " received for your loan #{$loanId}. Remaining balance: ₵" . number_format($remainingLoan, 2);
+                $remaining = number_format($loan->amount_remaining, 2);
+                $msg = "Hi {$customer->full_name}, payment of ₵" . number_format($payment->amount, 2) .
+                    " received for your loan #{$loan->id}. Remaining balance: ₵{$remaining}";
                 SmsNotifier::send($customer->phone, $msg);
 
-                // 🔹 Notify if loan fully paid
-                if ($remainingLoan <= 0.009) {
-                    $msg2 = "🎉 Congratulations {$customer->full_name}! Your loan #{$loanId} has been fully cleared. Thank you for your timely payments!";
+                if ($loan->status === 'paid') {
+                    $msg2 = "🎉 Congratulations {$customer->full_name}! Your loan #{$loan->id} has been fully cleared. Thank you for your timely payments!";
                     SmsNotifier::send($customer->phone, $msg2);
                 }
             }
 
-            Log::info('✅ Payment distributed successfully', [
-                'loan_id' => $loanId,
+            Log::info('✅ PaymentObserver: Payment applied successfully', [
                 'payment_id' => $payment->id,
-                'applied_amount' => $amount,
-                'remaining_to_apply' => $remainingToApply,
-                'remaining_loan_balance' => $remainingLoan,
+                'loan_id' => $loan->id,
+                'applied_amount' => $payment->amount,
+                'remaining_balance' => $loan->amount_remaining,
             ]);
         } catch (\Throwable $e) {
-            Log::error('❌ Payment allocation failed', [
+            Log::error('❌ PaymentObserver: Failed to apply payment', [
                 'error' => $e->getMessage(),
                 'payment_id' => $payment->id ?? null,
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
             ]);
         }
     }

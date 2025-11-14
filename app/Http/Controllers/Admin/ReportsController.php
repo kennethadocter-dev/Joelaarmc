@@ -17,7 +17,7 @@ use Carbon\Carbon;
 
 class ReportsController extends Controller
 {
-    /** 🔧 Role-based helper (kept for context) */
+    /** 🔧 Role-based helper */
     private function basePath(): string
     {
         $u = auth()->user();
@@ -26,7 +26,7 @@ class ReportsController extends Controller
             : 'admin';
     }
 
-    /** 📊 Reports Dashboard (shared between Admin + Superadmin) */
+    /** 📊 Reports Dashboard (Admin + Superadmin shared) */
     public function index(Request $request)
     {
         try {
@@ -114,7 +114,6 @@ class ReportsController extends Controller
 
             ActivityLogger::log('Viewed Reports', 'Reports dashboard viewed by ' . auth()->user()->name);
 
-            // ✅ Shared React view for all roles
             return Inertia::render('Admin/Reports/Index', [
                 'loans'    => $loans,
                 'totals'   => $totals,
@@ -136,23 +135,26 @@ class ReportsController extends Controller
         }
     }
 
-    /** 📑 Single Loan Report (shared) */
+    /** 📑 Single Loan Report (shared between admin + superadmin) */
     public function show($loanId)
     {
         try {
             $loan = Loan::with(['customer', 'guarantors', 'payments', 'user'])->findOrFail($loanId);
 
+            // ✅ Fetch company settings correctly
+            $settings = Setting::first();
+
             $today = Carbon::now();
-            $agreementLine = "THIS LOAN AGREEMENT is made at BOLGATANGA this {$today->format('jS')} day of {$today->format('F')} {$today->format('Y')} between Joelaar Micro-Credit Services (hereinafter referred to as the \"Lender\") and {$loan->client_name} (hereinafter referred to as the \"Borrower\").";
+            $agreementLine = "THIS LOAN AGREEMENT is made at {$settings->company_name} office on the {$today->format('jS')} day of {$today->format('F')} {$today->format('Y')} between {$settings->company_name} (hereinafter referred to as the \"Lender\") and {$loan->client_name} (hereinafter referred to as the \"Borrower\").";
 
             ActivityLogger::log('Viewed Loan Report', "Loan #{$loan->id} viewed by " . auth()->user()->name);
 
-            // ✅ Shared React view
             return Inertia::render('Admin/Reports/Show', [
                 'loan'           => $loan,
                 'guarantors'     => $loan->guarantors,
                 'csrf_token'     => csrf_token(),
                 'agreement_line' => $agreementLine,
+                'settings'       => $settings, // ✅ passed to front-end
                 'auth'           => ['user' => auth()->user()],
                 'basePath'       => $this->basePath(),
                 'flash'          => [
@@ -216,7 +218,7 @@ class ReportsController extends Controller
         }
     }
 
-    /** 🧰 Unified Error Handler */
+    /** 🧰 Centralized Error Handler */
     private function handleError(\Throwable $e, string $message)
     {
         Log::error('❌ ReportsController Error', [

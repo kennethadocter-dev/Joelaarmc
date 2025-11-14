@@ -1,12 +1,23 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head } from "@inertiajs/react";
+import { Head, usePage } from "@inertiajs/react";
 import UpdatePasswordForm from "./Partials/UpdatePasswordForm";
 import UpdateProfileInformationForm from "./Partials/UpdateProfileInformationForm";
 import { useEffect, useState } from "react";
 
 export default function Edit({ mustVerifyEmail, status }) {
+    const { props } = usePage();
+    const guard = props?.auth?.guard || "web"; // detect if user is customer or admin/staff
+    const user = props?.auth?.user || {};
+
     const [successMessage, setSuccessMessage] = useState("");
     const [passwordMessage, setPasswordMessage] = useState("");
+
+    // show flash success when Laravel flashes 'profile-updated'
+    useEffect(() => {
+        if (status === "profile-updated") {
+            setSuccessMessage("Profile updated successfully!");
+        }
+    }, [status]);
 
     useEffect(() => {
         if (successMessage || passwordMessage) {
@@ -22,7 +33,7 @@ export default function Edit({ mustVerifyEmail, status }) {
         <AuthenticatedLayout
             header={
                 <h2 className="text-xl font-semibold leading-tight text-gray-800">
-                    Profile
+                    {guard === "customer" ? "My Profile" : "Profile Settings"}
                 </h2>
             }
         >
@@ -48,19 +59,21 @@ export default function Edit({ mustVerifyEmail, status }) {
                     </section>
 
                     {/* 🔒 Update Password */}
-                    <section className="bg-white/90 backdrop-blur-md border border-gray-100 p-6 sm:p-8 rounded-xl shadow-sm hover:shadow-md transition relative">
-                        <UpdatePasswordForm
-                            className="max-w-xl"
-                            onUpdated={() =>
-                                setPasswordMessage("Password updated")
-                            }
-                        />
-                        {passwordMessage && (
-                            <div className="absolute top-4 right-6 bg-green-100 text-green-700 text-sm font-medium px-4 py-2 rounded-md shadow-sm transition-opacity duration-500">
-                                {passwordMessage}
-                            </div>
-                        )}
-                    </section>
+                    {guard !== "customer" && (
+                        <section className="bg-white/90 backdrop-blur-md border border-gray-100 p-6 sm:p-8 rounded-xl shadow-sm hover:shadow-md transition relative">
+                            <UpdatePasswordForm
+                                className="max-w-xl"
+                                onUpdated={() =>
+                                    setPasswordMessage("Password updated")
+                                }
+                            />
+                            {passwordMessage && (
+                                <div className="absolute top-4 right-6 bg-green-100 text-green-700 text-sm font-medium px-4 py-2 rounded-md shadow-sm transition-opacity duration-500">
+                                    {passwordMessage}
+                                </div>
+                            )}
+                        </section>
+                    )}
                 </div>
             </div>
         </AuthenticatedLayout>

@@ -108,7 +108,7 @@ class PaymentController extends Controller
             $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
             $userId = auth()->id() ?? 1;
 
-            // 💾 Create payment
+            // 💾 Create payment record
             $payment = Payment::create([
                 'loan_id'        => $loan->id,
                 'received_by'    => $userId,
@@ -121,7 +121,7 @@ class PaymentController extends Controller
 
             Log::info('✅ Payment created successfully', ['payment_id' => $payment->id]);
 
-            // 🔄 Apply payment to loan
+            // 🔄 Apply payment to this specific loan
             $this->applyPaymentToLoan($loan, $validated['amount']);
             DB::commit();
 
@@ -299,35 +299,72 @@ class PaymentController extends Controller
         }
     }
 
-    /** 🧮 Apply payment to schedules */
+    /** 🧮 Apply payment to next unpaid schedules safely (with rollback guard) */
     private function applyPaymentToLoan(Loan $loan, float $amount)
     {
-        $remaining = $amount;
+        DB::beginTransaction();
 
-        foreach ($loan->loanSchedules()->orderBy('payment_number')->get() as $s) {
-            if ($remaining <= 0) break;
+        try {
+            $remaining = round($amount, 2);
 
-            $balance = $s->amount_left ?? ($s->amount - $s->amount_paid);
-            if ($balance <= 0) continue;
+            // Load only unpaid schedules for this loan
+            $schedules = $loan->loanSchedules()
+                ->where(function ($q) {
+                    $q->where('is_paid', false)->orWhereNull('is_paid');
+                })
+                ->orderBy('payment_number')
+                ->lockForUpdate()
+                ->get();
 
-            if ($remaining >= $balance) {
-                $s->amount_paid += $balance;
-                $remaining -= $balance;
-            } else {
-                $s->amount_paid += $remaining;
-                $remaining = 0;
+            foreach ($schedules as $schedule) {
+                if ($remaining <= 0) break;
+
+                $balance = round(max(0, $schedule->amount - $schedule->amount_paid), 2);
+                if ($balance <= 0) continue;
+
+                $applied = min($remaining, $balance);
+                $schedule->amount_paid += $applied;
+                $schedule->amount_left = max(0, round($schedule->amount - $schedule->amount_paid, 2));
+                $schedule->is_paid     = $schedule->amount_left <= 0.01;
+                $schedule->note        = $schedule->is_paid
+                    ? "Installment fully paid on " . now()->format('Y-m-d')
+                    : "Partial payment on " . now()->format('Y-m-d');
+                $schedule->save();
+
+                $remaining -= $applied;
             }
 
-            $s->amount_left = max(0, $s->amount - $s->amount_paid);
-            $s->is_paid     = $s->amount_left <= 0.01;
-            $s->note        = $s->is_paid ? 'Fully paid' : 'Partially paid';
-            $s->save();
-        }
+            // Recalculate totals
+            $loan->refresh();
+            $loan->amount_paid      = round($loan->loanSchedules()->sum('amount_paid'), 2);
+            $loan->amount_remaining = round($loan->loanSchedules()->sum('amount_left'), 2);
 
-        $loan->amount_paid      = $loan->loanSchedules()->sum('amount_paid');
-        $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
-        $loan->status           = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
-        $loan->save();
+            // Handle rounding drift or overpayment
+            if ($loan->amount_remaining <= 0.01) {
+                $loan->amount_remaining = 0;
+                $loan->status = 'paid';
+            } else {
+                $loan->status = 'active';
+            }
+
+            $loan->save();
+
+            DB::commit();
+
+            Log::info('💰 Payment applied successfully', [
+                'loan_id' => $loan->id,
+                'applied_amount' => $amount,
+                'remaining_balance' => $loan->amount_remaining,
+                'status' => $loan->status,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('❌ Error during payment application', [
+                'loan_id' => $loan->id,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     /** ⚠️ Show error details */

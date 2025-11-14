@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Guarantor extends Model
 {
+    use HasFactory;
+
     protected $fillable = [
-        'loan_id',       // ✅ Added this
+        'loan_id',
         'customer_id',
         'name',
         'occupation',

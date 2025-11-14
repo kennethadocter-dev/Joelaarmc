@@ -14,6 +14,7 @@ export default function Edit() {
         marital_status: customer.marital_status || "",
         gender: customer.gender || "",
         house_no: customer.house_no || "",
+        address: customer.address || "",
         community: customer.community || "",
         location: customer.location || "",
         district: customer.district || "",
@@ -41,7 +42,7 @@ export default function Edit() {
                 : [{ name: "", occupation: "", residence: "", contact: "" }],
     });
 
-    // ➕ Add / Remove / Update Guarantors
+    /* ➕ Add / Remove / Update Guarantors */
     const addGuarantor = () =>
         setData("guarantors", [
             ...data.guarantors,
@@ -60,7 +61,7 @@ export default function Edit() {
         setData("guarantors", updated);
     };
 
-    // 💾 Submit Update
+    /* 💾 Submit */
     const handleSubmit = (e) => {
         e.preventDefault();
         put(route(`${basePath}.customers.update`, customer.id), {
@@ -90,7 +91,7 @@ export default function Edit() {
         >
             <Head title={`Edit ${customer.full_name ?? "Customer"}`} />
 
-            {/* Toast */}
+            {/* Toast Notification */}
             {toast && (
                 <div
                     className={`fixed top-5 right-5 z-50 ${toastColor} text-white px-4 py-3 rounded-lg shadow-lg`}
@@ -107,7 +108,7 @@ export default function Edit() {
                     </h1>
 
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* Personal */}
+                        {/* 🧍 Personal Information */}
                         <Section title="Personal Information">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -171,13 +172,18 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* Address */}
+                        {/* 🏠 Address */}
                         <Section title="Address Information">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
                                     label="House No"
                                     value={data.house_no}
                                     onChange={(v) => setData("house_no", v)}
+                                />
+                                <Field
+                                    label="Address"
+                                    value={data.address}
+                                    onChange={(v) => setData("address", v)}
                                 />
                                 <Field
                                     label="Community"
@@ -204,7 +210,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* Work & Income */}
+                        {/* 💼 Work & Income */}
                         <Section title="Work & Income">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -256,7 +262,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* Loan Request */}
+                        {/* 💰 Loan Request */}
                         <Section title="Loan Request Information">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -275,7 +281,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* Guarantors */}
+                        {/* 👥 Guarantors */}
                         <Section title="Guarantors">
                             <div className="flex justify-between mb-3">
                                 <h3 className="text-gray-800 font-semibold">
@@ -297,7 +303,7 @@ export default function Edit() {
                                 >
                                     <input
                                         className="border rounded w-full p-2 bg-white text-gray-900"
-                                        placeholder="Name *"
+                                        placeholder="Name"
                                         value={g.name}
                                         onChange={(e) =>
                                             updateGuarantor(
@@ -306,7 +312,6 @@ export default function Edit() {
                                                 e.target.value,
                                             )
                                         }
-                                        required
                                     />
                                     <input
                                         className="border rounded w-full p-2 bg-white text-gray-900"
@@ -361,7 +366,7 @@ export default function Edit() {
                             ))}
                         </Section>
 
-                        {/* Submit */}
+                        {/* ✅ Submit */}
                         <div className="flex justify-between items-center pt-4 border-t">
                             <Link
                                 href={route(`${basePath}.customers.index`)}
@@ -385,7 +390,7 @@ export default function Edit() {
     );
 }
 
-/* 🔹 Helpers */
+/* 🔹 Helper Components */
 function Section({ title, children }) {
     return (
         <section className="mt-4">

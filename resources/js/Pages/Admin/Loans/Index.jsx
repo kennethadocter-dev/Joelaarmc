@@ -1,7 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useState, useEffect } from "react";
-import { Toaster, toast } from "react-hot-toast";
 
 export default function LoansIndex() {
     const {
@@ -17,11 +16,13 @@ export default function LoansIndex() {
     const [clientSearch, setClientSearch] = useState(filters.client || "");
     const [status, setStatus] = useState(filters.status || "");
 
+    /* 🎉 Global toast flashes */
     useEffect(() => {
-        if (flash?.success) toast.success(flash.success);
-        if (flash?.error) toast.error(flash.error);
+        if (flash?.success) window.toast?.success?.(flash.success);
+        if (flash?.error) window.toast?.error?.(flash.error);
     }, [flash]);
 
+    /* 🔍 Debounced search + filter */
     useEffect(() => {
         const delay = setTimeout(() => {
             router.get(
@@ -36,7 +37,10 @@ export default function LoansIndex() {
         return () => clearTimeout(delay);
     }, [clientSearch, status]);
 
+    /* 💰 Money formatter */
     const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
+
+    /* 📅 Date formatter */
     const formatDate = (date) =>
         date
             ? new Date(date).toLocaleDateString("en-US", {
@@ -45,18 +49,39 @@ export default function LoansIndex() {
                   day: "numeric",
               })
             : "—";
-    const daysOverdue = (dueDate) => {
-        if (!dueDate) return null;
-        const due = new Date(dueDate);
+
+    /* ⚙️ Compute loan status */
+    const getStatus = (loan) => {
+        const remaining = parseFloat(loan.amount_remaining ?? 0);
+        const due = new Date(loan.due_date);
         const now = new Date();
-        const diff = Math.floor((now - due) / (1000 * 60 * 60 * 24));
-        return diff > 0 ? diff : null;
+
+        if (remaining <= 0) return "paid";
+        if (loan.due_date && now > due && remaining > 0) return "overdue";
+        return "active";
+    };
+
+    /* 🎨 Badge color */
+    const badge = (status) => {
+        switch (status) {
+            case "active":
+                return "bg-blue-100 text-blue-700";
+            case "paid":
+                return "bg-green-100 text-green-700";
+            case "pending":
+                return "bg-yellow-100 text-yellow-700";
+            case "overdue":
+                return "bg-red-100 text-red-700";
+            default:
+                return "bg-gray-100 text-gray-700";
+        }
     };
 
     const canManage =
         ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
         user?.is_super_admin;
 
+    /* 🧾 Card Component */
     const Card = ({ title, sub, count = 0, sum = 0, onView }) => (
         <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-transform duration-200 w-64 p-5 flex flex-col gap-2 border border-gray-100">
             <div className="text-sm font-medium text-gray-500">{title}</div>
@@ -73,21 +98,6 @@ export default function LoansIndex() {
         </div>
     );
 
-    const badge = (status) => {
-        switch (status) {
-            case "active":
-                return "bg-blue-100 text-blue-700";
-            case "paid":
-                return "bg-green-100 text-green-700";
-            case "pending":
-                return "bg-yellow-100 text-yellow-700";
-            case "overdue":
-                return "bg-red-100 text-red-700";
-            default:
-                return "bg-gray-100 text-gray-700";
-        }
-    };
-
     return (
         <AuthenticatedLayout
             header={
@@ -97,7 +107,6 @@ export default function LoansIndex() {
             }
         >
             <Head title="All Loans" />
-            <Toaster position="top-right" />
 
             <div className="py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
                 {/* 💠 Summary Cards */}
@@ -134,9 +143,9 @@ export default function LoansIndex() {
                     </div>
                 </div>
 
-                {/* 🔍 Filters + Actions */}
+                {/* 🔍 Filters */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
+                    <div className="flex items-center gap-3 flex-wrap">
                         <select
                             value={status}
                             onChange={(e) => setStatus(e.target.value)}
@@ -144,7 +153,6 @@ export default function LoansIndex() {
                         >
                             <option value="">All statuses</option>
                             <option value="active">Active</option>
-                            <option value="pending">Pending</option>
                             <option value="paid">Paid</option>
                             <option value="overdue">Overdue</option>
                         </select>
@@ -156,15 +164,6 @@ export default function LoansIndex() {
                             onChange={(e) => setClientSearch(e.target.value)}
                             className="border border-gray-300 rounded-md px-3 py-2 text-sm w-full md:w-64 bg-white text-gray-800"
                         />
-
-                        <button
-                            onClick={() =>
-                                router.reload({ only: ["loans", "summary"] })
-                            }
-                            className="px-4 py-2 text-sm font-semibold rounded-md bg-green-600 text-white hover:bg-green-700 transition shadow"
-                        >
-                            Refresh
-                        </button>
 
                         {(status || clientSearch) && (
                             <button
@@ -179,7 +178,7 @@ export default function LoansIndex() {
                                 }}
                                 className="px-4 py-2 text-sm font-semibold rounded-md bg-gray-800 text-white hover:bg-black transition shadow"
                             >
-                                Clear Filters
+                                Clear
                             </button>
                         )}
                     </div>
@@ -201,15 +200,13 @@ export default function LoansIndex() {
                             <tr>
                                 {[
                                     "ID",
-                                    "Client Name",
+                                    "Client",
                                     "Created By",
                                     "Amount",
-                                    "Interest",
-                                    "Term",
+                                    "Remaining",
                                     "Start Date",
                                     "Due Date",
                                     "Status",
-                                    "Remaining",
                                     "Actions",
                                 ].map((h) => (
                                     <th
@@ -225,14 +222,12 @@ export default function LoansIndex() {
                         <tbody className="divide-y divide-gray-200">
                             {loans.length ? (
                                 loans.map((loan) => {
-                                    const overdueDays = daysOverdue(
-                                        loan.due_date,
-                                    );
+                                    const computedStatus = getStatus(loan);
                                     return (
                                         <tr
                                             key={loan.id}
-                                            className={`hover:bg-gray-100 transition-colors duration-150 ${
-                                                loan.status === "overdue"
+                                            className={`hover:bg-gray-100 transition-colors ${
+                                                computedStatus === "overdue"
                                                     ? "bg-red-50"
                                                     : ""
                                             }`}
@@ -250,46 +245,24 @@ export default function LoansIndex() {
                                                 {money(loan.amount)}
                                             </td>
                                             <td className="px-4 py-3 text-sm text-gray-700">
-                                                {loan.interest_rate}%
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-gray-700">
-                                                {loan.term_months}
+                                                {money(loan.amount_remaining)}
                                             </td>
                                             <td className="px-4 py-3 text-sm text-gray-700">
                                                 {formatDate(loan.start_date)}
                                             </td>
                                             <td className="px-4 py-3 text-sm text-gray-700">
-                                                {loan.due_date ? (
-                                                    <>
-                                                        {formatDate(
-                                                            loan.due_date,
-                                                        )}
-                                                        {overdueDays && (
-                                                            <span className="ml-1 text-xs text-red-600">
-                                                                ({overdueDays}{" "}
-                                                                days overdue)
-                                                            </span>
-                                                        )}
-                                                    </>
-                                                ) : (
-                                                    "—"
-                                                )}
+                                                {formatDate(loan.due_date)}
                                             </td>
                                             <td className="px-4 py-3 text-sm">
                                                 <span
                                                     className={`px-2 py-1 rounded-full text-xs font-semibold ${badge(
-                                                        loan.status,
+                                                        computedStatus,
                                                     )}`}
                                                 >
-                                                    {loan.status}
+                                                    {computedStatus.toUpperCase()}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3 text-sm font-medium text-gray-700">
-                                                {money(
-                                                    loan.amount_remaining ?? 0,
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm flex flex-wrap gap-2">
+                                            <td className="px-4 py-3 text-sm">
                                                 <Link
                                                     href={route(
                                                         `${basePath}.loans.show`,
@@ -298,7 +271,7 @@ export default function LoansIndex() {
                                                     preserveScroll
                                                     className="px-3 py-1.5 bg-indigo-600 text-white rounded-full text-xs font-semibold hover:bg-indigo-700 transition"
                                                 >
-                                                    View Loan
+                                                    View
                                                 </Link>
                                             </td>
                                         </tr>
@@ -307,7 +280,7 @@ export default function LoansIndex() {
                             ) : (
                                 <tr>
                                     <td
-                                        colSpan="11"
+                                        colSpan="9"
                                         className="text-center py-6 text-gray-600"
                                     >
                                         No loans found.

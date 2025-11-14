@@ -1,124 +1,123 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, useForm, usePage, router } from "@inertiajs/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useState } from "react";
 import { toast, Toaster } from "react-hot-toast";
+import { route } from "ziggy-js";
 
 export default function LoanCreate() {
     const {
-        auth,
-        prefill_client_name,
-        prefill_customer_id,
-        defaults,
         basePath = "admin",
+        prefill_customer_id,
+        prefill_client_name,
+        prefill_amount,
         flash = {},
     } = usePage().props;
 
-    const toastShown = useRef(false);
-
     const urlParams = new URLSearchParams(window.location.search);
-    const prefillAmount = urlParams.get("loan_amount");
+    const queryCustomerId = urlParams.get("customer_id");
+    const queryAmount = urlParams.get("requested_amount");
+    const queryClientName = urlParams.get("client_name");
 
-    // ✅ Automatically load interest rate from settings (defaults)
-    const interestRateFromSettings = defaults?.interest_rate ?? 20;
+    const flashCustomer = flash?.customer || {};
 
-    const { data, setData, post, processing, errors } = useForm({
-        customer_id: prefill_customer_id || urlParams.get("customer_id") || "",
-        client_name: prefill_client_name || "",
-        amount: prefillAmount || "",
-        interest_rate: interestRateFromSettings,
+    const { data, setData, post, processing, errors, reset } = useForm({
+        customer_id:
+            queryCustomerId || prefill_customer_id || flashCustomer.id || "",
+        client_name:
+            queryClientName ||
+            prefill_client_name ||
+            flashCustomer.full_name ||
+            "",
+        amount:
+            queryAmount ||
+            prefill_amount ||
+            flashCustomer.loan_amount_requested ||
+            "",
         term_months: "",
-        start_date: new Date().toISOString().split("T")[0],
-        due_date: "",
+        interest_rate: 20, // ✅ Default 20%
+        start_date: new Date().toISOString().slice(0, 10),
         notes: "",
     });
 
-    // ✅ Flash Toasts
+    const [schedule, setSchedule] = useState([]);
+    const [summary, setSummary] = useState({
+        totalPayment: 0,
+        monthlyPayment: 0,
+        totalInterest: 0,
+    });
+
+    // 💰 Real repayment logic based on ₵200 base loan
+    const baseRates = {
+        1: 240,
+        2: 131 * 2,
+        3: 95 * 3,
+        4: 78 * 4,
+        5: 67 * 5,
+        6: 61 * 6,
+    };
+
+    // 🧮 Auto calculate schedule and summary
     useEffect(() => {
-        if (!toastShown.current) {
-            if (flash?.success) {
-                toast.success(flash.success, { duration: 3000 });
-                toastShown.current = true;
-            } else if (flash?.error) {
-                toast.error(flash.error, { duration: 3000 });
-                toastShown.current = true;
-            }
+        const amount = parseFloat(data.amount) || 0;
+        const months = parseInt(data.term_months) || 0;
+
+        if (amount > 0 && months > 0) {
+            const scale = amount / 200;
+            const totalPayment = baseRates[months] * scale;
+            const monthlyPayment = totalPayment / months;
+            const totalInterest = totalPayment - amount;
+
+            setSummary({
+                totalPayment: totalPayment.toFixed(2),
+                monthlyPayment: monthlyPayment.toFixed(2),
+                totalInterest: totalInterest.toFixed(2),
+            });
+
+            const newSchedule = Array.from({ length: months }, (_, i) => ({
+                num: i + 1,
+                due: new Date(
+                    new Date(data.start_date).setMonth(
+                        new Date(data.start_date).getMonth() + i + 1,
+                    ),
+                )
+                    .toISOString()
+                    .slice(0, 10),
+                amount: monthlyPayment.toFixed(2),
+            }));
+
+            setSchedule(newSchedule);
+        } else {
+            setSchedule([]);
+            setSummary({
+                totalPayment: 0,
+                monthlyPayment: 0,
+                totalInterest: 0,
+            });
         }
-    }, [flash]);
+    }, [data.amount, data.term_months, data.start_date]);
 
-    // ✅ Auto-calculate due date
-    useEffect(() => {
-        if (data.start_date && data.term_months) {
-            const start = new Date(data.start_date);
-            const due = new Date(start);
-            due.setMonth(start.getMonth() + Number(data.term_months));
-            setData("due_date", due.toISOString().split("T")[0]);
-        }
-    }, [data.start_date, data.term_months]);
-
-    // ✅ Loan Calculation (safe + accurate)
-    const { paymentSchedule, totalPayable, monthlyPayment } = useMemo(() => {
-        const months = Number(data.term_months) || 0;
-        const amount = Number(data.amount) || 0;
-        const rate = Number(data.interest_rate) || 0;
-        const startDate = data.start_date
-            ? new Date(data.start_date)
-            : new Date();
-
-        if (months <= 0 || amount <= 0) {
-            return { paymentSchedule: [], totalPayable: 0, monthlyPayment: 0 };
-        }
-
-        // 🔹 Calculate total payable with simple interest
-        const total = amount * (1 + (rate / 100) * (months / 12));
-        const monthly = total / months;
-
-        // 🔹 Build schedule
-        const schedule = Array.from({ length: months }, (_, i) => {
-            const dueDate = new Date(startDate);
-            dueDate.setMonth(startDate.getMonth() + (i + 1));
-            return {
-                month: i + 1,
-                amount_payable: monthly.toFixed(2),
-                due_date: dueDate.toISOString().split("T")[0],
-            };
-        });
-
-        return {
-            paymentSchedule: schedule,
-            totalPayable: total,
-            monthlyPayment: monthly,
-        };
-    }, [data.amount, data.interest_rate, data.term_months, data.start_date]);
-
-    // ✅ Submit
-    const submit = (e) => {
+    // 🧾 Submit
+    const handleSubmit = (e) => {
         e.preventDefault();
-        if (processing) return;
 
         post(route(`${basePath}.loans.store`), {
-            preserveScroll: true,
-            onSuccess: (page) => {
-                if (
-                    !page.props.errors ||
-                    Object.keys(page.props.errors).length === 0
-                ) {
-                    toast.success("✅ Loan created successfully!", {
-                        duration: 3000,
-                    });
-                    toastShown.current = true;
-                    setTimeout(() => {
-                        router.visit(route(`${basePath}.loans.index`));
-                    }, 1200);
-                }
+            onSuccess: () => {
+                toast.success("✅ Loan created successfully!", {
+                    duration: 2000,
+                });
+                setTimeout(() => {
+                    router.visit(route(`${basePath}.loans.index`));
+                }, 1500);
+                reset();
             },
-            onError: (err) => {
-                if (err && Object.keys(err).length > 0) {
-                    toast.error(
-                        Object.values(err)[0] ||
-                            "⚠️ Please fix validation errors.",
-                        { duration: 3000 },
-                    );
-                }
+            onError: (errs) => {
+                const first =
+                    errs && Object.values(errs)?.[0]
+                        ? Array.isArray(Object.values(errs)[0])
+                            ? Object.values(errs)[0][0]
+                            : Object.values(errs)[0]
+                        : "⚠️ Please check highlighted fields.";
+                toast.error(first, { duration: 3000 });
             },
         });
     };
@@ -134,230 +133,226 @@ export default function LoanCreate() {
             <Head title="Create Loan" />
             <Toaster position="top-right" />
 
-            <div className="py-8 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-                {/* 🡨 Back Button */}
-                <div className="mb-4">
+            <div className="max-w-5xl mx-auto py-8 px-4 space-y-8">
+                {/* 🔙 Back */}
+                <div className="flex justify-start mb-4">
                     <Link
-                        href={route(`${basePath}.customers.index`)}
-                        className="text-gray-600 text-sm hover:text-indigo-600 flex items-center gap-1 transition"
+                        href={route(`${basePath}.loans.index`)}
+                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg border"
                     >
-                        <span className="text-lg">←</span> Back to Customers
+                        ← Back
                     </Link>
                 </div>
 
                 {/* 🧾 Loan Form */}
                 <form
-                    onSubmit={submit}
-                    className="bg-white shadow-xl rounded-lg p-6 space-y-6 border border-gray-200 transition hover:shadow-2xl duration-200"
+                    onSubmit={handleSubmit}
+                    className="space-y-6 bg-white p-6 rounded-lg shadow"
                 >
-                    {/* 🧍 Client Info */}
-                    <div className="border-b pb-4 flex flex-wrap justify-between items-center gap-4">
-                        <h3 className="text-lg font-semibold text-gray-800">
-                            Client Information
-                        </h3>
-                        <div className="flex gap-6 text-gray-700">
-                            <p>
-                                <strong>Name:</strong> {data.client_name}
-                            </p>
-                            <p>
-                                <strong>Customer ID:</strong> {data.customer_id}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* 💰 Loan Details */}
+                    {/* BASIC DETAILS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Field
+                            label="Client Name *"
+                            value={data.client_name}
+                            onChange={(v) => setData("client_name", v)}
+                            required
+                        />
                         <Field
                             label="Loan Amount (₵)"
                             type="number"
                             value={data.amount}
-                            setValue={(v) => setData("amount", v)}
-                            error={errors.amount}
+                            onChange={(v) => setData("amount", v)}
                             required
                         />
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">
+                                Term (Months){" "}
+                                <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                                className="input"
+                                value={data.term_months}
+                                onChange={(e) =>
+                                    setData("term_months", e.target.value)
+                                }
+                                required
+                            >
+                                <option value="">Select...</option>
+                                {[1, 2, 3, 4, 5, 6].map((m) => (
+                                    <option key={m} value={m}>
+                                        {m} Month{m > 1 && "s"}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
+                        {/* ✅ New Interest Rate Field */}
                         <Field
                             label="Interest Rate (%)"
                             type="number"
                             value={data.interest_rate}
-                            setValue={(v) => setData("interest_rate", v)}
-                            error={errors.interest_rate}
+                            onChange={(v) => setData("interest_rate", v)}
                             required
-                            disabled // read-only from settings
                         />
-
-                        <div>
-                            <label className="block text-sm text-gray-700">
-                                Loan Term (Months){" "}
-                                <span className="text-red-500">*</span>
-                            </label>
-                            <select
-                                value={data.term_months}
-                                onChange={(e) => {
-                                    const months = Number(e.target.value);
-                                    if (months > 6) {
-                                        toast.error(
-                                            "Maximum term is 6 months.",
-                                            { duration: 2500 },
-                                        );
-                                        setData("term_months", 6);
-                                    } else {
-                                        setData("term_months", months);
-                                    }
-                                }}
-                                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 hover:border-indigo-400 transition"
-                                required
-                            >
-                                <option value="">Select term...</option>
-                                {[1, 2, 3, 4, 5, 6].map((m) => (
-                                    <option key={m} value={m}>
-                                        {m} {m === 1 ? "Month" : "Months"}
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.term_months && (
-                                <p className="text-red-500 text-sm mt-1">
-                                    {errors.term_months}
-                                </p>
-                            )}
-                        </div>
-
                         <Field
                             label="Start Date"
                             type="date"
                             value={data.start_date}
-                            setValue={(v) => setData("start_date", v)}
-                            error={errors.start_date}
-                            required
+                            onChange={(v) => setData("start_date", v)}
                         />
-
-                        <Field
-                            label="Due Date"
-                            type="date"
-                            value={data.due_date}
-                            setValue={(v) => setData("due_date", v)}
-                            error={errors.due_date}
-                            required
-                        />
-
-                        <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700">
-                                Notes
-                            </label>
-                            <textarea
-                                value={data.notes}
-                                onChange={(e) =>
-                                    setData("notes", e.target.value)
-                                }
-                                rows="3"
-                                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 hover:border-indigo-400 transition"
-                            ></textarea>
-                            {errors.notes && (
-                                <p className="text-red-500 text-sm mt-1">
-                                    {errors.notes}
-                                </p>
-                            )}
-                        </div>
                     </div>
 
-                    {/* 📅 Payment Schedule */}
-                    {paymentSchedule.length > 0 && (
-                        <div className="mt-6 animate-fadeIn">
-                            <h3 className="text-lg font-semibold mb-2 text-gray-800">
-                                Payment Schedule
-                            </h3>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm border border-gray-200 rounded-md">
-                                    <thead className="bg-gray-100 text-gray-700">
-                                        <tr>
-                                            <th className="p-2 border">
-                                                Month
-                                            </th>
-                                            <th className="p-2 border">
-                                                Amount Payable (₵)
-                                            </th>
-                                            <th className="p-2 border">
-                                                Due Date
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {paymentSchedule.map((item) => (
-                                            <tr
-                                                key={item.month}
-                                                className="text-center"
-                                            >
-                                                <td className="border p-2">
-                                                    {item.month}
-                                                </td>
-                                                <td className="border p-2 font-semibold">
-                                                    {item.amount_payable}
-                                                </td>
-                                                <td className="border p-2">
-                                                    {item.due_date}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                    {/* NOTES */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">
+                            Notes
+                        </label>
+                        <textarea
+                            className="input h-24"
+                            value={data.notes}
+                            onChange={(e) => setData("notes", e.target.value)}
+                            placeholder="Optional remarks..."
+                        ></textarea>
+                    </div>
 
-                            {/* 💰 Totals */}
-                            <div className="flex flex-col md:flex-row justify-end mt-4 gap-3 text-right">
-                                <div className="bg-green-50 border border-green-500 text-green-700 font-semibold px-6 py-3 rounded-lg shadow-sm">
-                                    Total Payable (₵): {totalPayable.toFixed(2)}
-                                </div>
-                                <div className="bg-blue-50 border border-blue-500 text-blue-700 font-semibold px-6 py-3 rounded-lg shadow-sm">
-                                    Monthly Payment (₵):{" "}
-                                    {monthlyPayment.toFixed(2)}
-                                </div>
+                    {/* 🌟 Summary */}
+                    {schedule.length > 0 && (
+                        <div className="bg-gray-50 border rounded-lg p-5 shadow-sm">
+                            <h3 className="font-semibold text-gray-700 mb-4 text-lg">
+                                Loan Summary
+                            </h3>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+                                <SummaryBox
+                                    icon="📅"
+                                    label="Term"
+                                    value={`${data.term_months} Month(s)`}
+                                />
+                                <SummaryBox
+                                    icon="💸"
+                                    label="Monthly Payment"
+                                    value={`₵${summary.monthlyPayment}`}
+                                />
+                                <SummaryBox
+                                    icon="💰"
+                                    label="Total Payment"
+                                    value={`₵${summary.totalPayment}`}
+                                />
+                                <SummaryBox
+                                    icon="📊"
+                                    label="Total Interest"
+                                    value={`₵${summary.totalInterest}`}
+                                    highlight
+                                />
+                                <SummaryBox
+                                    icon="📈"
+                                    label="Interest Rate"
+                                    value={`${data.interest_rate}%`}
+                                />
                             </div>
                         </div>
                     )}
 
-                    <div className="flex justify-end border-t pt-4">
+                    {/* TABLE */}
+                    {schedule.length > 0 && (
+                        <div className="overflow-x-auto border rounded-lg">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-gray-100">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left">
+                                            #
+                                        </th>
+                                        <th className="px-4 py-2 text-left">
+                                            Due Date
+                                        </th>
+                                        <th className="px-4 py-2 text-left">
+                                            Payment (₵)
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {schedule.map((item) => (
+                                        <tr key={item.num} className="border-t">
+                                            <td className="px-4 py-2">
+                                                {item.num}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                {item.due}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                {item.amount}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* BUTTONS */}
+                    <div className="flex justify-between pt-4 border-t">
+                        <Link
+                            href={route(`${basePath}.loans.index`)}
+                            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg border"
+                        >
+                            ← Back
+                        </Link>
                         <button
                             type="submit"
                             disabled={processing}
-                            className="px-6 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 disabled:opacity-50 transition"
+                            className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition"
                         >
                             {processing ? "Saving..." : "Save Loan"}
                         </button>
                     </div>
                 </form>
             </div>
+
+            <style>{`
+                .input {
+                    width: 100%;
+                    border: 1px solid #d1d5db;
+                    border-radius: .375rem;
+                    padding: .5rem .75rem;
+                    background: white;
+                    color: #111827;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+                }
+            `}</style>
         </AuthenticatedLayout>
     );
 }
 
-/* 🔹 Reusable Field Component */
-function Field({
-    label,
-    type = "text",
-    value,
-    setValue,
-    error,
-    required,
-    min,
-    max,
-    disabled,
-}) {
+/* 🔹 Reusable input field */
+function Field({ label, type = "text", value, onChange, required }) {
     return (
-        <div className="transition">
-            <label className="block text-sm text-gray-700 mb-1">
+        <div>
+            <label className="block text-sm font-medium text-gray-700">
                 {label} {required && <span className="text-red-500">*</span>}
             </label>
             <input
                 type={type}
+                className="input"
                 value={value}
-                min={min}
-                max={max}
-                disabled={disabled}
-                onChange={(e) => setValue(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 hover:border-indigo-400 transition disabled:bg-gray-100"
+                onChange={(e) => onChange(e.target.value)}
                 required={required}
             />
-            {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+        </div>
+    );
+}
+
+/* 💎 Reusable summary box */
+function SummaryBox({ icon, label, value, highlight = false }) {
+    return (
+        <div
+            className={`p-3 rounded-md text-center shadow-sm ${
+                highlight
+                    ? "bg-green-50 border border-green-300 text-green-800 font-semibold"
+                    : "bg-white border text-gray-700"
+            }`}
+        >
+            <div className="text-2xl mb-1">{icon}</div>
+            <div className="text-sm font-medium">{label}</div>
+            <div className="text-base font-semibold mt-1">{value}</div>
         </div>
     );
 }

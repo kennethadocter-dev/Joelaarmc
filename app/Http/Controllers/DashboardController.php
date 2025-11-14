@@ -4,243 +4,251 @@ namespace App\Http\Controllers;
 
 use App\Models\Loan;
 use App\Models\Customer;
-use App\Models\Payment;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
-use Inertia\Inertia;
-use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Inertia\Inertia;
+use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
-    /**
-     * 🏠 Main Dashboard
-     */
+    // -------------------------------------------
+    // REDIRECT /dashboard
+    // -------------------------------------------
+    public function redirect()
+    {
+        $user = Auth::user();
+        if (!$user) return redirect()->route('login');
+
+        if ($user->is_super_admin || $user->role === 'superadmin') {
+            return redirect()->route('superadmin.dashboard');
+        }
+
+        // staff dashboard = admin dashboard
+        if (in_array($user->role, ['admin', 'staff'])) {
+            return redirect()->route('admin.dashboard');
+        }
+
+        abort(403, 'Unauthorized');
+    }
+
+    // -------------------------------------------
+    // MAIN INDEX
+    // -------------------------------------------
     public function index()
     {
         try {
             $user = Auth::user();
-            $role = strtolower($user->role ?? '');
+            if (!$user) return redirect()->route('login');
 
-            // =====================================================
-            // 🧑‍💼 ADMIN / SUPERADMIN DASHBOARD
-            // =====================================================
-            if ($role !== 'user') {
-                $currentYear = now()->year;
-
-                $interestEarned = Loan::where(DB::raw('LOWER(status)'), 'paid')
-                    ->sum('interest_earned');
-
-                $pendingRepayment = 0;
-
-                if (Schema::hasTable('loan_schedules')) {
-                    $pendingRepayment = DB::table('loan_schedules')
-                        ->where('is_paid', 0)
-                        ->sum('amount_left');
-                } elseif (Schema::hasColumn('loans', 'amount_remaining')) {
-                    $pendingRepayment = DB::table('loans')
-                        ->whereIn(DB::raw('LOWER(status)'), ['active', 'overdue'])
-                        ->sum('amount_remaining');
-                } else {
-                    $pendingRepayment = Loan::whereIn(DB::raw('LOWER(status)'), ['active', 'overdue'])
-                        ->get()
-                        ->sum(function ($loan) {
-                            $interestRate = is_numeric($loan->interest_rate) ? $loan->interest_rate : 0;
-                            $totalWithInterest = $loan->amount + ($loan->amount * $interestRate / 100);
-                            $paid = DB::table('payments')->where('loan_id', $loan->id)->sum('amount');
-                            return max(0, round($totalWithInterest - abs($paid ?? 0), 2));
-                        });
-                }
-
-                $summary = [
-                    'totalLoans'       => Loan::count(),
-                    'totalCustomers'   => Customer::count(),
-                    'totalDisbursed'   => round(Loan::sum('amount'), 2),
-                    'pendingRepayment' => round($pendingRepayment ?? 0, 2),
-                    'overdueLoans'     => Loan::where(DB::raw('LOWER(status)'), 'overdue')->count(),
-                    'interestEarned'   => round($interestEarned ?? 0, 2),
-                    'activeLoans'      => Loan::where(DB::raw('LOWER(status)'), 'active')->count(),
-                    'pendingLoans'     => Loan::where(DB::raw('LOWER(status)'), 'pending')->count(),
-                    'paidLoans'        => Loan::where(DB::raw('LOWER(status)'), 'paid')->count(),
-                ];
-
-                $recentLoans = Loan::latest()
-                    ->take(5)
-                    ->get(['id', 'client_name', 'amount', 'status', 'created_at']);
-
-                $recentCustomers = Customer::withSum('loans', 'amount')
-                    ->latest()
-                    ->take(5)
-                    ->get()
-                    ->map(function ($c) {
-                        $c->name = $c->full_name ?: ($c->email ?? 'Unnamed');
-                        return $c;
-                    });
-
-                return Inertia::render('Dashboard', [
-                    'auth'            => ['user' => $user],
-                    'stats'           => $summary,
-                    'recentLoans'     => $recentLoans,
-                    'recentCustomers' => $recentCustomers,
-                    'userLoans'       => null,
-                    'userPayments'    => null,
-                    'lastPayment'     => null,
-                ]);
+            // SUPERADMIN
+            if ($user->is_super_admin || $user->role === 'superadmin') {
+                return $this->superAdminDashboard();
             }
 
-            // =====================================================
-            // 👤 CUSTOMER DASHBOARD
-            // =====================================================
-            $customer = Customer::where('email', $user->email)
-                ->orWhere('phone', $user->phone)
-                ->with(['loans.payments' => fn($q) => $q->latest()])
-                ->first();
-
-            if (!$customer) {
-                return redirect()->route('dashboard')
-                    ->with('error', '⚠️ Your customer record could not be found. Please contact support.');
+            // ADMIN OR STAFF => same dashboard, different permissions
+            if (in_array($user->role, ['admin', 'staff'])) {
+                return $this->adminDashboard();
             }
 
-            $loans = $customer->loans ?? collect();
+            abort(403);
 
-            $activeLoan = $loans->whereIn('status', ['active', 'overdue'])->first()
-                ?: $loans->sortByDesc('created_at')->first();
-
-            if (!$activeLoan) {
-                return Inertia::render('Dashboard', [
-                    'auth' => ['user' => $user],
-                    'userLoans' => [
-                        'totalLoan' => 0,
-                        'amountPaid' => 0,
-                        'amountLeft' => 0,
-                        'status' => 'No active loan',
-                    ],
-                    'loanHistory' => [],
-                    'userPayments' => [],
-                    'lastPayment' => null,
-                ]);
-            }
-
-            // ✅ Use the same multiplier logic used in LoanController
-            $multiplier = $this->getInterestMultiplier($activeLoan);
-            $totalWithInterest = round($activeLoan->amount * $multiplier, 2);
-
-            $amountPaid = DB::table('payments')
-                ->where('loan_id', $activeLoan->id)
-                ->sum('amount');
-
-            $amountLeft = round(max(0, $totalWithInterest - $amountPaid), 2);
-
-            $lastPayment = Payment::where('loan_id', $activeLoan->id)
-                ->latest('paid_at')
-                ->first(['amount', 'paid_at', 'reference']);
-
-            $nextDueDate = $activeLoan?->due_date ? Carbon::parse($activeLoan->due_date) : null;
-            $termMonths = $activeLoan?->term_months ?? 1;
-            $nextPaymentAmount = round($totalWithInterest / $termMonths, 2);
-            $daysRemaining = $nextDueDate ? now()->diffInDays($nextDueDate, false) : null;
-
-            $payments = Payment::where('loan_id', $activeLoan->id)
-                ->latest()
-                ->take(10)
-                ->get(['id', 'amount', 'paid_at', 'reference']);
-
-            $loanHistory = $loans
-                ->sortByDesc('created_at')
-                ->map(function ($loan) {
-                    $multiplier = $this->getInterestMultiplier($loan);
-                    $totalWithInterest = round($loan->amount * $multiplier, 2);
-                    $paid = DB::table('payments')->where('loan_id', $loan->id)->sum('amount');
-                    return [
-                        'id' => $loan->id,
-                        'status' => $loan->status,
-                        'amount_paid' => $paid,
-                        'due_date' => $loan->due_date,
-                        'paid_at' => $loan->paid_at,
-                        'next_due_payment' => $loan->due_date,
-                    ];
-                })
-                ->values();
-
-            return Inertia::render('Dashboard', [
-                'auth' => ['user' => $user],
-                'userLoans' => [
-                    'totalLoan' => $totalWithInterest,
-                    'amountPaid' => $amountPaid,
-                    'amountLeft' => $amountLeft,
-                    'status' => $activeLoan->status,
-                    'nextDueDate' => $nextDueDate,
-                    'nextPaymentAmount' => $nextPaymentAmount,
-                    'daysRemaining' => $daysRemaining,
-                ],
-                'loanHistory' => $loanHistory,
-                'userPayments' => $payments,
-                'lastPayment' => $lastPayment,
-            ]);
         } catch (\Throwable $e) {
-            Log::error('❌ Dashboard load failed', [
-                'user' => Auth::user()?->email,
-                'role' => Auth::user()?->role,
+            Log::error('Dashboard Error', [
                 'error' => $e->getMessage(),
+                'line'  => $e->getLine(),
             ]);
 
-            return redirect()->route('dashboard')
-                ->with('error', '⚠️ Something went wrong while loading your dashboard. Please try again.');
+            return redirect()->route('login')->with('error', 'Dashboard failed to load.');
         }
     }
 
-    /**
-     * 🧮 Helper - determine multiplier
-     */
-    private function getInterestMultiplier($loan)
+    // -------------------------------------------
+    // SUPERADMIN (uses Shared/Dashboard)
+    // -------------------------------------------
+    private function superAdminDashboard()
     {
-        $multipliers = [
-            1 => 1.20,
-            2 => 1.31,
-            3 => 1.425,
-            4 => 1.56,
-            5 => 1.67,
-            6 => 1.83,
-        ];
-        return $multipliers[$loan->term_months] ?? (1 + ($loan->interest_rate ?? 0) / 100);
+        $user = Auth::user();
+        $summary = $this->getLoanSummary();
+
+        return Inertia::render('Shared/Dashboard', [
+            'auth' => ['user' => $user],
+            'viewType' => 'superadmin',
+            'stats' => $summary,
+            'totalExpectedInterest' => $summary['expectedInterest'],
+            'recentLoans' => $this->getRecentLoans(),
+            'recentCustomers' => $this->getRecentCustomers(),
+            'refreshUrl' => route('superadmin.dashboard.refresh'),
+        ]);
     }
 
-    /**
-     * 📊 Chart API - Loans per month (PostgreSQL safe)
-     */
-    public function getLoansByYear()
+    // -------------------------------------------
+    // ADMIN + STAFF (both use Shared/Dashboard)
+    // -------------------------------------------
+    private function adminDashboard()
+    {
+        $user = Auth::user();
+        $summary = $this->getLoanSummary();
+
+        return Inertia::render('Shared/Dashboard', [
+            'auth' => ['user' => $user],
+            'viewType' => strtolower($user->role), // "admin" or "staff"
+            'stats' => $summary,
+            'totalExpectedInterest' => $summary['expectedInterest'],
+            'recentLoans' => $this->getRecentLoans(),
+            'recentCustomers' => $this->getRecentCustomers(),
+            'refreshUrl' => route('admin.dashboard.refresh'),
+        ]);
+    }
+
+    // -------------------------------------------
+    // LOAN SUMMARY
+    // -------------------------------------------
+    private function getLoanSummary()
+    {
+        return [
+            'totalLoans'       => Loan::count(),
+            'totalCustomers'   => Customer::count(),
+            'totalDisbursed'   => Loan::sum('amount'),
+
+            'pendingRepayment' => Loan::whereIn(DB::raw('LOWER(status)'), [
+                'active', 'pending', 'overdue'
+            ])->sum('amount_remaining'),
+
+            'expectedInterest' => Loan::whereIn(DB::raw('LOWER(status)'), [
+                'active', 'pending', 'overdue'
+            ])->sum('expected_interest'),
+
+            'interestEarned'   => Loan::whereRaw("LOWER(status)='paid'")
+                ->sum('interest_earned'),
+
+            'activeLoans'  => Loan::whereRaw("LOWER(status)='active'")->count(),
+            'pendingLoans' => Loan::whereRaw("LOWER(status)='pending'")->count(),
+            'paidLoans'    => Loan::whereRaw("LOWER(status)='paid'")->count(),
+            'overdueLoans' => Loan::whereRaw("LOWER(status)='overdue'")->count(),
+        ];
+    }
+
+    // -------------------------------------------
+    // RECENT LOANS
+    // -------------------------------------------
+    private function getRecentLoans()
+    {
+        return Loan::select('id', 'client_name', 'amount', 'status', 'created_at')
+            ->latest()
+            ->take(5)
+            ->get();
+    }
+
+    // -------------------------------------------
+    // RECENT CUSTOMERS
+    // -------------------------------------------
+    private function getRecentCustomers()
+    {
+        return Customer::withSum('loans', 'amount')
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(function ($c) {
+                return [
+                    'id' => $c->id,
+                    'full_name' => $c->full_name ?? $c->email,
+                    'phone' => $c->phone,
+                    'loans_sum_amount' => $c->loans_sum_amount ?? 0,
+                ];
+            });
+    }
+
+    // -------------------------------------------
+    // EXPECTED INTEREST
+    // -------------------------------------------
+    public function expectedInterest()
     {
         try {
-            $year = request('year', now()->year);
-            $connection = config('database.default');
+            $user = Auth::user();
 
-            if ($connection === 'pgsql') {
-                $rows = Loan::selectRaw("EXTRACT(MONTH FROM created_at) AS month_key, COUNT(*) AS cnt")
-                    ->whereRaw("EXTRACT(YEAR FROM created_at) = ?", [$year])
-                    ->groupBy('month_key')
-                    ->pluck('cnt', 'month_key');
-            } elseif ($connection === 'sqlite') {
-                $rows = Loan::selectRaw("strftime('%m', created_at) AS month_key, COUNT(*) AS cnt")
-                    ->whereRaw("strftime('%Y', created_at) = ?", [$year])
-                    ->groupBy('month_key')
-                    ->pluck('cnt', 'month_key');
-            } else {
-                $rows = Loan::selectRaw("MONTH(created_at) AS month_key, COUNT(*) AS cnt")
-                    ->whereYear('created_at', $year)
-                    ->groupBy('month_key')
-                    ->pluck('cnt', 'month_key');
-            }
+            $loans = Loan::whereIn(DB::raw('LOWER(status)'), [
+                'active', 'pending', 'overdue'
+            ])
+                ->latest()
+                ->get();
+
+            $totalExpected = round(
+                $loans->sum(fn($l) => $l->expected_interest ?? $l->interest ?? 0),
+                2
+            );
+
+            return Inertia::render('ExpectedInterest', [
+                'auth' => ['user' => $user],
+                'loans' => $loans,
+                'totalExpected' => $totalExpected,
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::error('Expected Interest Error', [
+                'error' => $e->getMessage(),
+                'line'  => $e->getLine()
+            ]);
+
+            $role = strtolower(Auth::user()->role ?? 'admin');
+            return redirect()
+                ->route($role === 'superadmin' ? 'superadmin.dashboard' : 'admin.dashboard')
+                ->with('error', 'Failed to load expected interest page.');
+        }
+    }
+
+    // -------------------------------------------
+    // REFRESH WIDGET
+    // -------------------------------------------
+    public function refresh()
+    {
+        try {
+            return response()->json([
+                'expectedInterest' => Loan::whereIn(DB::raw('LOWER(status)'), [
+                    'active','pending','overdue'
+                ])->sum('expected_interest'),
+
+                'interestEarned' => Loan::whereRaw("LOWER(status)='paid'")
+                    ->sum('interest_earned'),
+
+                'pendingRepayment' => Loan::whereIn(DB::raw('LOWER(status)'), [
+                    'active','pending','overdue'
+                ])->sum('amount_remaining'),
+
+                'timestamp' => now()->toDateTimeString(),
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::error('Refresh failed', ['error' => $e->getMessage()]);
+            return response()->json(['error' => 'Refresh failed'], 500);
+        }
+    }
+
+    // -------------------------------------------
+    // LOANS BY YEAR (chart)
+    // -------------------------------------------
+    public function getLoansByYear(Request $request)
+    {
+        try {
+            $year = $request->input('year', now()->year);
+
+            $rows = Loan::selectRaw("MONTH(created_at) AS m, COUNT(*) AS c")
+                ->whereYear('created_at', $year)
+                ->groupBy('m')
+                ->pluck('c', 'm');
 
             $result = [];
             for ($m = 1; $m <= 12; $m++) {
-                $key = str_pad((string) $m, 2, '0', STR_PAD_LEFT);
-                $result[$key] = (int) ($rows[$key] ?? 0);
+                $result[str_pad($m, 2, '0', STR_PAD_LEFT)] = $rows[$m] ?? 0;
             }
 
-            return response()->json($result);
+            return response()->json([
+                'year' => $year,
+                'data' => $result
+            ]);
+
         } catch (\Throwable $e) {
-            Log::error('❌ Chart load failed', ['error' => $e->getMessage()]);
+            Log::error('Chart error', ['error' => $e->getMessage()]);
             return response()->json([], 500);
         }
     }

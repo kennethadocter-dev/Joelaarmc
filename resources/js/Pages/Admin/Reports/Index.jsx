@@ -1,15 +1,19 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
 import { useEffect, useState, useRef } from "react";
-import { route } from "ziggy-js"; // ✅ Correct import
 import { printSection } from "@/utils/printSection";
-import Toast from "@/Components/Toast";
-import ConfirmationModal from "@/Components/ConfirmationModal";
 
-// ✅ Currency formatter
+// Simple fallback confirm
+const useConfirm = () => {
+    return (title, message, onConfirm) => {
+        if (window.confirm(`${title}\n\n${message}`)) {
+            onConfirm();
+        }
+    };
+};
+
+// Helpers
 const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
-
-// ✅ Date formatter
 const fmt = (d) =>
     d
         ? new Date(d).toLocaleDateString("en-US", {
@@ -30,23 +34,15 @@ export default function ReportsIndex() {
     } = usePage().props;
 
     const user = auth?.user || {};
+    const confirm = useConfirm();
     const [q, setQ] = useState(filters.q || "");
     const tableRef = useRef(null);
-    const [toast, setToast] = useState({
-        message: flash?.success || flash?.error || "",
-        type: flash?.success ? "success" : flash?.error ? "error" : "success",
-    });
-    const [modal, setModal] = useState({
-        open: false,
-        action: null,
-        loanId: null,
-    });
 
     const canManage =
         ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
         user?.is_super_admin;
 
-    /* 🔍 Debounced Search */
+    // Debounced search
     useEffect(() => {
         if (q === "" && !filters.q) return;
         const timeout = setTimeout(() => {
@@ -56,13 +52,14 @@ export default function ReportsIndex() {
                 { preserveScroll: true, preserveState: true, replace: true },
             );
         }, 400);
+
         return () => clearTimeout(timeout);
     }, [q]);
 
-    /* 🖨 Print */
+    // Print
     const handlePrint = () => {
         if (!tableRef.current)
-            return setToast({ message: "⚠️ Nothing to print!", type: "error" });
+            return window.toast?.error?.("⚠️ Nothing to print!");
 
         printSection(
             tableRef.current,
@@ -71,170 +68,133 @@ export default function ReportsIndex() {
         );
     };
 
-    /* 🧩 Modal Controls */
-    const openModal = (action, loanId = null) =>
-        setModal({ open: true, action, loanId });
-    const closeModal = () =>
-        setModal({ open: false, action: null, loanId: null });
-
-    /* 🔁 Confirm Modal Action */
-    const confirmModalAction = () => {
-        const { action, loanId } = modal;
-        closeModal();
-
-        if (action === "retry") {
-            router.post(
-                route(`${basePath}.reports.sendAgreement`, loanId),
-                {},
-                {
-                    preserveScroll: true,
-                    onSuccess: () =>
-                        setToast({
-                            message:
-                                "✅ Loan Agreement email resent successfully!",
-                            type: "success",
-                        }),
-                    onError: () =>
-                        setToast({
-                            message:
-                                "❌ Failed to resend Loan Agreement email.",
-                            type: "error",
-                        }),
-                },
-            );
-        } else if (action === "clear") {
-            router.post(
-                route(`${basePath}.reports.clearEmailFailures`),
-                {},
-                {
-                    preserveScroll: true,
-                    onSuccess: () =>
-                        setToast({
-                            message:
-                                "🧹 All email failures cleared successfully!",
-                            type: "success",
-                        }),
-                    onError: () =>
-                        setToast({
-                            message: "❌ Failed to clear failures. Try again.",
-                            type: "error",
-                        }),
-                },
-            );
-        }
+    // Retry email
+    const handleRetry = (loanId) => {
+        confirm(
+            "Retry Sending Email?",
+            "Resend this Loan Agreement email?",
+            () => {
+                router.post(
+                    route(`${basePath}.reports.sendAgreement`, loanId),
+                    {},
+                    {
+                        preserveScroll: true,
+                        onSuccess: () =>
+                            window.toast?.success?.("Email resent!"),
+                        onError: () =>
+                            window.toast?.error?.("Failed to resend email."),
+                    },
+                );
+            },
+        );
     };
+
+    // Clear failures
+    const handleClearFailures = () => {
+        confirm(
+            "Clear Email Failures?",
+            "This will delete ALL logged failures.",
+            () => {
+                router.post(
+                    route(`${basePath}.reports.clearEmailFailures`),
+                    {},
+                    {
+                        preserveScroll: true,
+                        onSuccess: () =>
+                            window.toast?.success?.("Failures cleared."),
+                        onError: () =>
+                            window.toast?.error?.("Could not clear failures."),
+                    },
+                );
+            },
+        );
+    };
+
+    // Flash messages
+    useEffect(() => {
+        if (flash?.success) window.toast?.success?.(flash.success);
+        if (flash?.error) window.toast?.error?.(flash.error);
+    }, [flash]);
 
     return (
         <AuthenticatedLayout
             header={
-                <h2 className="text-xl font-semibold text-gray-800">
-                    Reports Dashboard
+                <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200">
+                    Reports
                 </h2>
             }
         >
             <Head title="Reports" />
 
-            {toast.message && (
-                <Toast
-                    message={toast.message}
-                    type={toast.type}
-                    onClose={() => setToast({ message: "", type: "success" })}
-                />
-            )}
-
-            <ConfirmationModal
-                open={modal.open}
-                title={
-                    modal.action === "clear"
-                        ? "Clear All Failures?"
-                        : "Retry Sending Email?"
-                }
-                message={
-                    modal.action === "clear"
-                        ? "Are you sure you want to clear all email failure logs?"
-                        : "Are you sure you want to retry sending this Loan Agreement email?"
-                }
-                onConfirm={confirmModalAction}
-                onCancel={closeModal}
-            />
-
-            <div className="py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                <div className="flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
+            <div className="py-8 max-w-7xl mx-auto px-4 space-y-6">
+                {/* Filters */}
+                <div className="flex flex-col md:flex-row justify-between gap-3">
                     <div className="font-semibold text-gray-800 text-lg">
                         All Loans
                     </div>
 
-                    <div className="flex gap-3 w-full md:w-auto">
+                    <div className="flex gap-3">
                         <input
                             value={q}
                             onChange={(e) => setQ(e.target.value)}
-                            placeholder="Search by client name or loan ID…"
-                            className="border border-gray-300 rounded px-3 py-2 w-full md:w-80 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
+                            placeholder="Search by client or loan ID…"
+                            className="border rounded px-3 py-2 w-80"
                         />
                         <button
                             onClick={handlePrint}
-                            className="px-4 py-2 rounded bg-gray-800 text-white hover:bg-black transition shadow"
+                            className="px-4 py-2 bg-gray-800 text-white rounded"
                         >
-                            🖨️ Print Report
+                            🖨️ Print
                         </button>
                     </div>
                 </div>
 
+                {/* Failures */}
                 {failures?.length > 0 && (
-                    <div className="bg-red-50 border border-red-300 p-4 rounded-lg shadow-md">
-                        <h3 className="text-red-700 font-bold text-sm mb-2">
+                    <div className="bg-red-100 border p-4 rounded">
+                        <h3 className="font-bold text-red-700 mb-2">
                             ⚠️ Recent Email Failures
                         </h3>
-                        <ul className="divide-y divide-red-200 mb-3">
-                            {failures.map((f) => (
-                                <li
-                                    key={f.id}
-                                    className="py-2 flex flex-col md:flex-row md:items-center md:justify-between text-sm text-red-700"
-                                >
-                                    <div>
-                                        <div>
-                                            Failed to send <b>{f.subject}</b> to{" "}
-                                            <b>{f.recipient}</b>
-                                        </div>
-                                        <div className="text-xs text-red-500 truncate">
-                                            Reason: {f.error_message}
-                                        </div>
-                                        <div className="text-xs text-gray-500">
-                                            {new Date(
-                                                f.failed_at,
-                                            ).toLocaleString()}
-                                        </div>
-                                    </div>
 
-                                    <button
-                                        onClick={() =>
-                                            openModal("retry", f.loan_id)
-                                        }
-                                        className="mt-2 md:mt-0 px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-xs font-semibold shadow-sm transition"
-                                    >
-                                        🔁 Retry Send
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
+                        {failures.map((f) => (
+                            <div key={f.id} className="mb-3 p-2 border-b">
+                                <div>
+                                    Failed to send <b>{f.subject}</b> to{" "}
+                                    <b>{f.recipient}</b>
+                                </div>
+                                <small className="text-gray-600">
+                                    {new Date(f.failed_at).toLocaleString()}
+                                </small>
+
+                                <button
+                                    onClick={() => handleRetry(f.loan_id)}
+                                    className="mt-2 px-3 py-1 bg-yellow-500 text-white rounded"
+                                >
+                                    Retry
+                                </button>
+                            </div>
+                        ))}
+
                         <button
-                            onClick={() => openModal("clear")}
-                            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs font-semibold shadow-sm transition"
+                            onClick={handleClearFailures}
+                            className="mt-2 px-3 py-1 bg-red-600 text-white rounded"
                         >
-                            🧹 Clear All Failures
+                            Clear All
                         </button>
                     </div>
                 )}
 
+                {/* Table */}
                 <div
                     ref={tableRef}
-                    className="overflow-x-auto bg-white rounded-lg shadow"
+                    className="bg-white rounded shadow overflow-x-auto"
                 >
-                    <h2 className="text-center text-lg font-bold my-4 bg-gray-800 text-white py-2 rounded-md shadow-sm">
+                    <h2 className="text-center text-lg font-bold my-4 bg-gray-800 text-white py-2 rounded">
                         Loan Reports
                     </h2>
+
                     <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-100 text-gray-800">
+                        <thead className="bg-gray-100">
                             <tr>
                                 {[
                                     "Loan #",
@@ -256,27 +216,28 @@ export default function ReportsIndex() {
                                 ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200">
+
+                        <tbody>
                             {loans.length ? (
                                 loans.map((loan) => (
                                     <tr
                                         key={loan.id}
-                                        className="hover:bg-gray-50 transition"
+                                        className="hover:bg-gray-50"
                                     >
                                         <td className="px-4 py-3 text-sm">
                                             #{loan.id}
                                         </td>
                                         <td className="px-4 py-3 text-sm">
-                                            {loan.client_name || "—"}
+                                            {loan.client_name}
                                         </td>
                                         <td className="px-4 py-3 text-sm">
                                             {money(loan.amount)}
                                         </td>
                                         <td className="px-4 py-3 text-sm">
-                                            {loan.interest_rate ?? 0}%
+                                            {loan.interest_rate}%
                                         </td>
                                         <td className="px-4 py-3 text-sm">
-                                            {loan.term_months ?? 0} months
+                                            {loan.term_months} months
                                         </td>
                                         <td className="px-4 py-3 text-sm">
                                             {fmt(loan.start_date)}
@@ -284,24 +245,12 @@ export default function ReportsIndex() {
                                         <td className="px-4 py-3 text-sm">
                                             {fmt(loan.due_date)}
                                         </td>
+
                                         <td className="px-4 py-3 text-sm capitalize">
-                                            <span
-                                                className={`px-2 py-1 rounded text-xs ${
-                                                    loan.status === "paid"
-                                                        ? "bg-green-100 text-green-800"
-                                                        : loan.status ===
-                                                            "pending"
-                                                          ? "bg-yellow-100 text-yellow-800"
-                                                          : loan.status ===
-                                                              "overdue"
-                                                            ? "bg-red-100 text-red-800"
-                                                            : "bg-blue-100 text-blue-800"
-                                                }`}
-                                            >
-                                                {loan.status}
-                                            </span>
+                                            {loan.status}
                                         </td>
-                                        <td className="px-4 py-3 text-sm flex flex-wrap gap-2">
+
+                                        <td className="px-4 py-3 text-sm flex gap-2">
                                             <Link
                                                 href={route(
                                                     `${basePath}.reports.show`,
@@ -309,8 +258,9 @@ export default function ReportsIndex() {
                                                 )}
                                                 className="text-blue-600 hover:underline"
                                             >
-                                                View Full Report
+                                                View
                                             </Link>
+
                                             {canManage && (
                                                 <Link
                                                     href={route(
@@ -319,7 +269,7 @@ export default function ReportsIndex() {
                                                     )}
                                                     method="post"
                                                     as="button"
-                                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition"
+                                                    className="px-3 py-1 bg-green-600 text-white rounded"
                                                 >
                                                     Send Agreement
                                                 </Link>
@@ -331,7 +281,7 @@ export default function ReportsIndex() {
                                 <tr>
                                     <td
                                         colSpan="9"
-                                        className="text-center py-6 text-gray-600"
+                                        className="text-center py-6 text-gray-500"
                                     >
                                         No loans found.
                                     </td>

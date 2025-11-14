@@ -1,4 +1,4 @@
-import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
+import AuthenticatedLayout, { useConfirm } from "@/Layouts/AuthenticatedLayout";
 import { Head, usePage, router } from "@inertiajs/react";
 import { useState, useRef } from "react";
 import { printSection } from "@/utils/printSection";
@@ -8,6 +8,7 @@ export default function ActivityLogsIndex() {
     const logData = logs?.data || [];
     const [query, setQuery] = useState("");
     const tableRef = useRef(null);
+    const confirm = useConfirm();
 
     // 🔍 Client-side filter
     const filteredLogs = logData.filter((log) => {
@@ -20,14 +21,26 @@ export default function ActivityLogsIndex() {
         );
     });
 
+    // 🧹 Clear logs
     const clearLogs = () => {
-        if (
-            confirm(
-                "⚠️ Are you sure you want to clear all logs? This action cannot be undone.",
-            )
-        ) {
-            router.delete(route("activity.clear"));
-        }
+        confirm(
+            "Clear Activity Logs",
+            "Are you sure you want to clear all logs? This action cannot be undone.",
+            () => {
+                router.delete(route("activity.clear"), {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        window.toast?.success?.(
+                            "🧹 All logs cleared successfully!",
+                        );
+                    },
+                    onError: () => {
+                        window.toast?.error?.("❌ Failed to clear logs.");
+                    },
+                });
+            },
+            "danger",
+        );
     };
 
     return (
@@ -39,6 +52,7 @@ export default function ActivityLogsIndex() {
             }
         >
             <Head title="Activity Logs" />
+
             <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
                 {/* 🔍 Search / Buttons */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

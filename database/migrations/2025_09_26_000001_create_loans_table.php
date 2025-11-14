@@ -21,22 +21,23 @@ return new class extends Migration
             $table->string('client_name')->nullable();
 
             // 💰 Loan details
-            $table->decimal('amount', 12, 2);                 // principal amount
+            $table->decimal('amount', 12, 2);                     // principal amount
             $table->decimal('interest_rate', 5, 2)->default(20.00); // percentage
-            $table->integer('term_months')->default(1);       // 1–6 months
+            $table->integer('term_months')->default(1);            // 1–6 months
             $table->date('start_date');
             $table->date('due_date')->nullable();
 
             // 📊 Status tracking
-            $table->enum('status', ['pending', 'active', 'overdue', 'paid'])->default('pending');
+            $table->enum('status', ['pending', 'active', 'overdue', 'paid'])->default('pending')->index();
             $table->decimal('amount_paid', 12, 2)->default(0);
             $table->decimal('amount_remaining', 12, 2)->nullable();
 
             // 📅 Loan activation timestamp
             $table->timestamp('disbursed_at')->nullable();
 
-            // 💵 Interest actually earned (only updated once loan is fully paid)
-            $table->decimal('interest_earned', 12, 2)->default(0);
+            // 💵 Interest calculations
+            $table->decimal('expected_interest', 12, 2)->default(0); // ✅ newly added
+            $table->decimal('interest_earned', 12, 2)->default(0);   // actual interest (on full payment)
 
             // 📝 Optional description
             $table->text('notes')->nullable();

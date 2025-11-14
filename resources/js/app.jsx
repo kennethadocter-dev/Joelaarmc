@@ -1,39 +1,57 @@
 import "../css/app.css";
 import "./bootstrap";
 
-import { createInertiaApp } from "@inertiajs/react";
-import { resolvePageComponent } from "laravel-vite-plugin/inertia-helpers";
-import { createRoot } from "react-dom/client";
-import { Toaster } from "react-hot-toast"; // ✅ Toast notifications
+import { Ziggy } from "./ziggy";
+import { route } from "ziggy-js";
 
-/* ===========================================================
-   🧩 Disable console logs in production (hide DevTools message)
-   =========================================================== */
+window.route = (name, params, absolute) => route(name, params, absolute, Ziggy);
+
+import { createInertiaApp } from "@inertiajs/react";
+import { createRoot } from "react-dom/client";
+import { Toaster } from "react-hot-toast";
+
 if (import.meta.env.MODE === "production") {
     console.log = () => {};
     console.info = () => {};
     console.warn = () => {};
 }
 
-/* ===========================================================
-   🚀 Inertia App Setup
-   =========================================================== */
 const appName = import.meta.env.VITE_APP_NAME || "Laravel";
+
+const pages = import.meta.glob("./Pages/**/*.jsx");
+
+function normalizePath(name) {
+    return name
+        .split("/")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join("/");
+}
 
 createInertiaApp({
     title: (title) => `${title} - ${appName}`,
-    resolve: (name) =>
-        resolvePageComponent(
-            `./Pages/${name}.jsx`,
-            import.meta.glob("./Pages/**/*.jsx"),
-        ),
+
+    resolve: (name) => {
+        const safeName = normalizePath(name);
+        const key = `./Pages/${safeName}.jsx`;
+
+        if (!pages[key]) {
+            console.error("❌ Inertia Page Not Found:", {
+                requested: name,
+                normalized: safeName,
+                expectedKey: key,
+                available: Object.keys(pages),
+            });
+            throw new Error(`Page not found: ${key}`);
+        }
+
+        return pages[key]();
+    },
+
     setup({ el, App, props }) {
         const root = createRoot(el);
-
         root.render(
             <>
                 <App {...props} />
-                {/* ✅ Global toast handler */}
                 <Toaster
                     position="top-right"
                     toastOptions={{
@@ -43,23 +61,12 @@ createInertiaApp({
                             color: "#fff",
                             borderRadius: "10px",
                         },
-                        success: {
-                            iconTheme: {
-                                primary: "#4ade80", // green
-                                secondary: "#fff",
-                            },
-                        },
-                        error: {
-                            iconTheme: {
-                                primary: "#ef4444", // red
-                                secondary: "#fff",
-                            },
-                        },
                     }}
                 />
             </>,
         );
     },
+
     progress: {
         color: "#4B5563",
     },

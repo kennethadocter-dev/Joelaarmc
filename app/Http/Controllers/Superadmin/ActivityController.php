@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Superadmin;
 
+use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -9,6 +10,9 @@ use App\Helpers\ActivityLogger;
 
 class ActivityController extends Controller
 {
+    /**
+     * Determine base Inertia path depending on user
+     */
     private function basePath()
     {
         $u = auth()->user();
@@ -19,18 +23,27 @@ class ActivityController extends Controller
 
     public function __construct()
     {
+        // Must be authenticated
         $this->middleware(['auth']);
     }
 
-    /** 📋 Show logs */
+    /**
+     * 📋 Show activity logs
+     */
     public function index(Request $request)
     {
         $user = auth()->user();
-        if (!in_array($user->role, ['admin', 'superadmin', 'superuser'])) {
+
+        // ❗ Internal protection replacing broken middleware
+        if (
+            !$user->is_super_admin &&
+            !in_array($user->role, ['superadmin', 'admin', 'superuser'])
+        ) {
             abort(403, 'Access denied.');
         }
 
         $search = $request->query('q');
+
         $logs = ActivityLog::with('user:id,name,email')
             ->when($search, function ($q) use ($search) {
                 $q->where('action', 'like', "%{$search}%")
@@ -40,24 +53,36 @@ class ActivityController extends Controller
             ->paginate(30)
             ->withQueryString();
 
-        return Inertia::render(ucfirst($this->basePath()) . '/ActivityLog/Index', [
-            'logs'    => $logs,
-            'filters' => ['q' => $search],
-            'auth'    => ['user' => $user],
-            'basePath'=> $this->basePath(),
-        ]);
+        return Inertia::render(
+            ucfirst($this->basePath()) . '/ActivityLog/Index',
+            [
+                'logs'    => $logs,
+                'filters' => ['q' => $search],
+                'auth'    => ['user' => $user],
+                'basePath'=> $this->basePath(),
+            ]
+        );
     }
 
-    /** 🧹 Clear all logs */
+    /**
+     * 🧹 Clear all logs
+     */
     public function clear()
     {
         $user = auth()->user();
-        if (!in_array($user->role, ['admin', 'superadmin', 'superuser'])) {
+
+        // ❗ Internal security
+        if (
+            !$user->is_super_admin &&
+            !in_array($user->role, ['superadmin', 'admin', 'superuser'])
+        ) {
             abort(403, 'Access denied.');
         }
 
         ActivityLog::truncate();
+
         ActivityLogger::log('Cleared Activity Logs', "Cleared by {$user->name}");
+
         return back()->with('success', '✅ Logs cleared.');
     }
 }

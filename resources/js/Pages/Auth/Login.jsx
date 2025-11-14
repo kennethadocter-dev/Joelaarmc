@@ -7,11 +7,12 @@ import GuestLayout from "@/Layouts/GuestLayout";
 import { Head, Link, useForm, usePage } from "@inertiajs/react";
 
 export default function Login({ status, canResetPassword }) {
-    const { settings } = usePage().props;
-    const companyName = settings?.company_name || "Joelaar Micro-Credit";
+    // FIXED: Use appSettings, not settings
+    const { appSettings } = usePage().props;
+    const companyName = appSettings?.app_name || "Joelaar Micro-Credit";
 
     const { data, setData, post, processing, errors, reset } = useForm({
-        login: "",
+        login: "", // unified field for email or username
         password: "",
         remember: false,
     });
@@ -21,24 +22,6 @@ export default function Login({ status, canResetPassword }) {
         post(route("login"), {
             onFinish: () => reset("password"),
         });
-    };
-
-    // 🧠 Dynamic password reset routing
-    const getResetRoute = () => {
-        // You can change logic here if you later detect role automatically
-        const url = new URL(window.location.href);
-        const type = url.searchParams.get("type"); // e.g. ?type=admin
-        switch (type) {
-            case "superadmin":
-                return route("superadmin.password.request");
-            case "admin":
-            case "staff":
-                return route("admin.password.request");
-            case "customer":
-                return route("customer.password.request");
-            default:
-                return route("password.request");
-        }
     };
 
     return (
@@ -61,18 +44,16 @@ export default function Login({ status, canResetPassword }) {
                         {companyName}
                     </h2>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                        Sign into your account
+                        Sign in to your account
                     </p>
                 </div>
 
-                {/* Status message */}
                 {status && (
                     <div className="text-center text-sm font-medium text-green-600">
                         {status}
                     </div>
                 )}
 
-                {/* Login Form */}
                 <form onSubmit={submit} className="space-y-4">
                     {/* Email or Username */}
                     <div>
@@ -110,7 +91,7 @@ export default function Login({ status, canResetPassword }) {
                         />
                     </div>
 
-                    {/* Remember Me + Forgot Password */}
+                    {/* Remember me + Forgot password */}
                     <div className="flex items-center justify-between">
                         <label className="flex items-center">
                             <Checkbox
@@ -127,7 +108,7 @@ export default function Login({ status, canResetPassword }) {
 
                         {canResetPassword && (
                             <Link
-                                href={getResetRoute()}
+                                href={route("password.request")}
                                 className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                             >
                                 Forgot password?
@@ -135,7 +116,6 @@ export default function Login({ status, canResetPassword }) {
                         )}
                     </div>
 
-                    {/* Login Button */}
                     <div className="pt-2">
                         <PrimaryButton
                             className="w-full justify-center"
@@ -145,7 +125,6 @@ export default function Login({ status, canResetPassword }) {
                         </PrimaryButton>
                     </div>
 
-                    {/* ❗ Visible Login Error */}
                     {(errors.login || errors.email) && (
                         <div className="text-red-600 text-center text-sm font-medium mt-3">
                             ⚠️ Invalid credentials. Please check your
@@ -154,7 +133,7 @@ export default function Login({ status, canResetPassword }) {
                     )}
                 </form>
 
-                {/* Info Footer */}
+                {/* Footer Info */}
                 <div className="text-center text-sm text-gray-600 dark:text-gray-400 pt-6">
                     Need an account?
                     <br />

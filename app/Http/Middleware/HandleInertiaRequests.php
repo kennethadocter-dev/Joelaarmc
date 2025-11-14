@@ -7,54 +7,79 @@ use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
 {
-    /**
-     * The root template that is loaded on the first page visit.
-     *
-     * @var string
-     */
     protected $rootView = 'app';
 
-    /**
-     * Determines the current asset version.
-     */
     public function version(Request $request): ?string
     {
         return parent::version($request);
     }
 
     /**
-     * Define the props that are shared by default with all Inertia responses.
+     * Shared props for every Inertia page
      */
     public function share(Request $request): array
     {
         $user = $request->user();
+        $role = $user->role ?? null;
 
         /**
-         * 🧩 Detect the correct base path before rendering
-         * This ensures the frontend immediately knows if it’s under
-         * /admin or /superadmin — no more flickering or URL switching.
+         * -----------------------------------
+         * 🔍 BASE PATH DETECTION
+         * -----------------------------------
          */
-        $basePath = 'admin';
-        if ($user && ($user->is_super_admin || $user->role === 'superadmin')) {
-            $basePath = 'superadmin';
+        switch ($role) {
+            case 'superadmin':
+                $basePath = 'superadmin';
+                break;
+
+            case 'admin':
+            case 'staff':
+                $basePath = 'admin';
+                break;
+
+            case 'customer':
+                $basePath = 'user';
+                break;
+
+            default:
+                $basePath = '';
         }
 
-        // ⚠️ Do NOT call url()->defaults() — that causes hydration mismatch
-        // We only pass basePath to Inertia for role-aware routing.
-
         return array_merge(parent::share($request), [
-            // 🔐 Authentication info + permissions
+
+            /**
+             * -----------------------------------
+             * 🔐 AUTH USER SHARED TO FRONTEND
+             * -----------------------------------
+             */
             'auth' => [
-                'user' => $user,
-                'can' => [
-                    'superadmin' => $user?->can('access-superadmin') ?? false,
-                    'admin'      => $user?->can('access-admin') ?? false,
-                    'user'       => $user?->can('access-user') ?? false,
-                ],
+                'user' => $user ? [
+                    'id'    => $user->id,
+                    'name'  => $user->name ?? $user->full_name,
+                    'email' => $user->email ?? null,
+                    'role'  => $role,
+
+                    // 🔥 CRITICAL FIX — your frontend depends on this
+                    'is_super_admin' => ($role === 'superadmin'),
+                ] : null,
             ],
 
-            // 🌐 Role-based base path for frontend
+            /**
+             * -----------------------------------
+             * 🔁 BASE PATH FOR ROUTING
+             * -----------------------------------
+             */
             'basePath' => $basePath,
+
+            /**
+             * -----------------------------------
+             * 🔔 FLASH MESSAGES
+             * -----------------------------------
+             */
+            'flash' => [
+                'success' => session('success'),
+                'error'   => session('error'),
+            ],
         ]);
     }
 }

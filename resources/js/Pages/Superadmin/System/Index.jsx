@@ -1,465 +1,425 @@
-import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
+// ✅ Imports
+import AuthenticatedLayout, { useConfirm } from "@/Layouts/AuthenticatedLayout";
 import { Head, usePage } from "@inertiajs/react";
-import { useState, useEffect } from "react";
-import {
-    FaDatabase,
-    FaRedo,
-    FaTrashAlt,
-    FaHdd,
-    FaCheckCircle,
-    FaExclamationTriangle,
-    FaListUl,
-    FaDownload,
-    FaSyncAlt,
-    FaCloudUploadAlt,
-    FaRecycle,
-} from "react-icons/fa";
+import { useState } from "react";
+import axios from "axios";
+import { motion, AnimatePresence } from "framer-motion";
 
+// ✅ Main Component
 export default function SystemIndex() {
     const {
-        auth,
         stats = {},
-        flash = {},
+        backups = [],
         basePath = "superadmin",
-        backups: initialBackups = [],
     } = usePage().props;
-
-    const [loading, setLoading] = useState(null);
-    const [toast, setToast] = useState(null);
-    const [showConfirm, setShowConfirm] = useState(false);
-    const [pendingAction, setPendingAction] = useState(null);
-    const [keepMode, setKeepMode] = useState("superadmin_only");
-    const [backupFiles, setBackupFiles] = useState(initialBackups);
-    const [fileToDelete, setFileToDelete] = useState(null);
-    const [showDeleteModal, setShowDeleteModal] = useState(false);
-    const [showRestoreModal, setShowRestoreModal] = useState(false);
-    const [fileToRestore, setFileToRestore] = useState("");
-
-    // ✅ Toast helper
-    const showToast = (message, type = "info") => {
-        setToast({ message, type });
-        setTimeout(() => setToast(null), 4000);
-    };
-
-    useEffect(() => {
-        if (flash?.success) showToast(flash.success, "success");
-        if (flash?.error) showToast(flash.error, "error");
-    }, [flash]);
-
-    // 🔁 Fetch backups
-    const fetchBackups = async () => {
-        try {
-            const res = await fetch(route(`${basePath}.system.listBackups`), {
-                credentials: "same-origin",
-            });
-            const json = await res.json();
-            setBackupFiles(json.backups || []);
-        } catch {
-            showToast("Failed to load backups.", "error");
-        }
-    };
-
-    useEffect(() => {
-        fetchBackups();
-    }, []);
-
-    /** 💾 Create backup */
-    const handleBackup = async () => {
-        setLoading("backup");
-        try {
-            const csrf = document.querySelector(
-                'meta[name="csrf-token"]',
-            )?.content;
-            const res = await fetch(route(`${basePath}.system.backup`), {
-                method: "POST",
-                headers: { "X-CSRF-TOKEN": csrf, Accept: "application/json" },
-                credentials: "include",
-            });
-            const json = await res.json();
-            if (json.success) {
-                showToast(
-                    json.message || "✅ Backup completed successfully.",
-                    "success",
-                );
-                await fetchBackups();
-            } else showToast(json.message || "❌ Backup failed.", "error");
-        } catch {
-            showToast("❌ Backup failed to execute.", "error");
-        } finally {
-            setLoading(null);
-        }
-    };
-
-    /** 🗑 Delete backup */
-    const handleDeleteBackup = (file) => {
-        setFileToDelete(file);
-        setShowDeleteModal(true);
-    };
-
-    const confirmDeleteBackup = async () => {
-        if (!fileToDelete) return;
-        setLoading("delete");
-        try {
-            const csrf = document.querySelector(
-                'meta[name="csrf-token"]',
-            )?.content;
-            const res = await fetch(
-                route(`${basePath}.system.deleteBackup`, {
-                    file: fileToDelete,
-                }),
-                {
-                    method: "DELETE",
-                    headers: {
-                        "X-CSRF-TOKEN": csrf,
-                        Accept: "application/json",
-                    },
-                    credentials: "include",
-                },
-            );
-            const json = await res.json();
-            if (json.success) {
-                showToast(json.message, "success");
-                await fetchBackups();
-            } else
-                showToast(
-                    json.message || "❌ Failed to delete backup.",
-                    "error",
-                );
-        } catch {
-            showToast("❌ Failed to delete backup.", "error");
-        } finally {
-            setFileToDelete(null);
-            setShowDeleteModal(false);
-            setLoading(null);
-        }
-    };
-
-    /** 🩹 Restore backup */
-    const confirmRestoreBackup = async () => {
-        if (!fileToRestore) {
-            showToast("Please select a backup file to restore.", "error");
-            return;
-        }
-        setShowRestoreModal(false);
-        setLoading("restore");
-
-        try {
-            const csrf = document.querySelector(
-                'meta[name="csrf-token"]',
-            )?.content;
-            const res = await fetch(route(`${basePath}.system.restore`), {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRF-TOKEN": csrf,
-                    Accept: "application/json",
-                },
-                body: JSON.stringify({ file: fileToRestore }),
-                credentials: "include",
-            });
-            const json = await res.json();
-            if (json.success) showToast(json.message, "success");
-            else showToast(json.message || "❌ Restore failed.", "error");
-        } catch {
-            showToast("❌ Restore request failed.", "error");
-        } finally {
-            setLoading(null);
-        }
-    };
-
-    /** ♻️ System Reset */
-    const confirmReset = async () => {
-        setShowConfirm(false);
-        setLoading("reset");
-
-        try {
-            const csrf = document.querySelector(
-                'meta[name="csrf-token"]',
-            )?.content;
-            const res = await fetch(route(`${basePath}.system.reset`), {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRF-TOKEN": csrf,
-                    Accept: "application/json",
-                },
-                body: JSON.stringify({ keep: keepMode }),
-                credentials: "include",
-            });
-            const json = await res.json();
-            if (json.success) showToast(json.message, "success");
-            else showToast(json.message || "❌ Reset failed.", "error");
-        } catch {
-            showToast("❌ Reset request failed.", "error");
-        } finally {
-            setLoading(null);
-        }
-    };
 
     return (
         <AuthenticatedLayout
             header={
-                <h2 className="text-xl font-semibold text-gray-900">
-                    System Control
-                </h2>
+                <div className="flex items-center justify-between">
+                    <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+                        ⚙️ System Control Panel
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Manage backups, restore data, and perform system
+                        maintenance
+                    </p>
+                </div>
             }
         >
+            <SystemControlInner
+                stats={stats}
+                backups={backups}
+                basePath={basePath}
+            />
+        </AuthenticatedLayout>
+    );
+}
+
+// ✅ Inner Functional Component
+function SystemControlInner({ stats, backups, basePath }) {
+    const confirm = useConfirm();
+    const [loading, setLoading] = useState(false);
+    const [localBackups, setLocalBackups] = useState(backups || []);
+    const [resetMode, setResetMode] = useState("superadmin_only");
+    const [selectedBackup, setSelectedBackup] = useState("");
+    const [uploadFile, setUploadFile] = useState(null);
+
+    // 🔁 Refresh Backups
+    const refreshBackups = async () => {
+        try {
+            const res = await axios.get(
+                route(`${basePath}.system.listBackups`),
+            );
+            setLocalBackups(res.data.backups || []);
+            window.toast?.success?.("🔄 Backup list refreshed!");
+        } catch {
+            window.toast?.error?.("❌ Failed to refresh backups.");
+        }
+    };
+
+    // 💾 Create Backup
+    const handleBackup = () => {
+        confirm(
+            "Create Backup",
+            "Are you sure you want to create a new database backup?",
+            async () => {
+                try {
+                    setLoading(true);
+                    const res = await axios.post(
+                        route(`${basePath}.system.backup`),
+                    );
+                    setLocalBackups(res.data.backups || []);
+                    window.toast?.success?.(
+                        res.data.message || "✅ Backup created successfully!",
+                    );
+                } catch {
+                    window.toast?.error?.("❌ Backup failed.");
+                } finally {
+                    setLoading(false);
+                }
+            },
+            "info",
+        );
+    };
+
+    // ♻️ Restore Backup
+    const handleRestore = () => {
+        if (!selectedBackup)
+            return window.toast?.error?.(
+                "⚠️ Please select a backup file first.",
+            );
+
+        confirm(
+            "Restore Backup",
+            `Restore from "${selectedBackup}"? This will overwrite all data.`,
+            async () => {
+                try {
+                    setLoading(true);
+                    const res = await axios.post(
+                        route(`${basePath}.system.restore`),
+                        { file: selectedBackup },
+                    );
+                    window.toast?.success?.(
+                        res.data.message || "✅ Backup restored successfully!",
+                    );
+                } catch {
+                    window.toast?.error?.("❌ Restore failed.");
+                } finally {
+                    setLoading(false);
+                }
+            },
+            "warning",
+        );
+    };
+
+    // 📤 Upload Backup
+    const handleUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) setUploadFile(file);
+    };
+
+    const submitUpload = async () => {
+        if (!uploadFile)
+            return window.toast?.error?.("⚠️ Please choose a file first.");
+        const formData = new FormData();
+        formData.append("backup_file", uploadFile);
+
+        try {
+            setLoading(true);
+            const res = await axios.post(
+                route(`${basePath}.system.upload`),
+                formData,
+                { headers: { "Content-Type": "multipart/form-data" } },
+            );
+            setLocalBackups(res.data.backups || []);
+            window.toast?.success?.(
+                res.data.message || "✅ Backup uploaded successfully!",
+            );
+            setUploadFile(null);
+        } catch {
+            window.toast?.error?.("❌ Upload failed.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // 🔁 Recalculate Loans
+    const handleRecalculate = () => {
+        confirm(
+            "Recalculate Loans",
+            "Recalculate all loans and schedules?",
+            async () => {
+                try {
+                    setLoading(true);
+                    const res = await axios.post(
+                        route(`${basePath}.system.recalculateLoans`),
+                    );
+                    window.toast?.success?.(
+                        res.data.message || "✅ Loan recalculation complete!",
+                    );
+                } catch {
+                    window.toast?.error?.("❌ Recalculation failed.");
+                } finally {
+                    setLoading(false);
+                }
+            },
+            "info",
+        );
+    };
+
+    // 🧨 Reset System
+    const handleReset = () => {
+        confirm(
+            "System Reset",
+            `This will delete most data and keep: ${resetMode.replaceAll(
+                "_",
+                " ",
+            )}.`,
+            async () => {
+                try {
+                    setLoading(true);
+                    const res = await axios.post(
+                        route(`${basePath}.system.reset`),
+                        { keep: resetMode },
+                    );
+                    window.toast?.success?.(
+                        res.data.message || "✅ System reset complete!",
+                    );
+                } catch {
+                    window.toast?.error?.("❌ Reset failed.");
+                } finally {
+                    setLoading(false);
+                }
+            },
+            "danger",
+        );
+    };
+
+    // 🗑️ Delete Backup (fixed Ziggy bug)
+    const handleDeleteBackup = (file) => {
+        confirm(
+            "Delete Backup",
+            `Are you sure you want to delete "${file}"?`,
+            async () => {
+                try {
+                    setLoading(true);
+                    const res = await axios.post(
+                        route(`${basePath}.system.deleteBackup`),
+                        { file },
+                        { headers: { "X-HTTP-Method-Override": "DELETE" } },
+                    );
+                    setLocalBackups((prev) =>
+                        prev.filter((b) => b.file !== file),
+                    );
+                    window.toast?.success?.(
+                        res.data.message || "🗑️ Backup deleted successfully.",
+                    );
+                } catch {
+                    window.toast?.error?.("❌ Delete failed.");
+                } finally {
+                    setLoading(false);
+                }
+            },
+            "danger",
+        );
+    };
+
+    return (
+        <>
             <Head title="System Control" />
-
-            {/* ✅ Toast */}
-            {toast && (
-                <div
-                    className={`fixed top-5 right-5 px-4 py-3 rounded-md shadow-md text-white z-50 ${
-                        toast.type === "success"
-                            ? "bg-green-600"
-                            : toast.type === "error"
-                              ? "bg-red-600"
-                              : "bg-gray-700"
-                    }`}
-                >
-                    <div className="flex items-center gap-2 font-medium">
-                        {toast.type === "success" && <FaCheckCircle />}
-                        {toast.type === "error" && <FaExclamationTriangle />}
-                        <span>{toast.message}</span>
-                    </div>
-                </div>
-            )}
-
-            {/* ⚙️ Main Content */}
-            <div className="py-8 max-w-6xl mx-auto space-y-8">
-                {/* 🧮 Stats Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                    {Object.entries(stats).map(([key, val]) => (
-                        <div
-                            key={key}
-                            className="bg-white shadow rounded-lg p-4 text-center border hover:shadow-md transition"
-                        >
-                            <div className="text-sm uppercase text-gray-500">
-                                {key}
-                            </div>
-                            <div className="text-2xl font-bold text-gray-800">
-                                {val}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* 💾 Backup Section */}
-                <div className="bg-white p-6 shadow rounded-lg border space-y-6">
-                    <div className="flex justify-between items-center">
-                        <h3 className="text-lg font-semibold text-gray-800">
-                            <FaDatabase className="inline mr-2" /> Database
-                            Backups
-                        </h3>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={handleBackup}
-                                disabled={loading === "backup"}
-                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
-                            >
-                                <FaHdd />{" "}
-                                {loading === "backup"
-                                    ? "Creating..."
-                                    : "Create Backup"}
-                            </button>
-                            <button
-                                onClick={() => setShowRestoreModal(true)}
-                                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
-                            >
-                                <FaRedo /> Restore
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Table of backups */}
-                    <table className="min-w-full text-sm border-t">
-                        <thead className="bg-gray-100">
-                            <tr>
-                                <th className="text-left p-3 font-semibold">
-                                    File
-                                </th>
-                                <th className="text-left p-3 font-semibold">
-                                    Size
-                                </th>
-                                <th className="text-left p-3 font-semibold">
-                                    Date
-                                </th>
-                                <th className="text-left p-3 font-semibold">
-                                    Actions
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {backupFiles.length ? (
-                                backupFiles.map((b) => (
-                                    <tr
-                                        key={b.file}
-                                        className="border-b hover:bg-gray-50"
-                                    >
-                                        <td className="p-3 font-mono">
-                                            {b.file}
-                                        </td>
-                                        <td className="p-3">{b.size}</td>
-                                        <td className="p-3">{b.date}</td>
-                                        <td className="p-3 flex gap-3">
-                                            <a
-                                                href={`/${basePath}/system/download/${b.file}`}
-                                                className="text-blue-600 hover:underline flex items-center gap-1"
-                                            >
-                                                <FaDownload /> Download
-                                            </a>
-                                            <button
-                                                onClick={() =>
-                                                    handleDeleteBackup(b.file)
-                                                }
-                                                className="text-red-600 hover:underline flex items-center gap-1"
-                                            >
-                                                <FaTrashAlt /> Delete
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td
-                                        colSpan="4"
-                                        className="text-center text-gray-500 py-4"
-                                    >
-                                        No backups available.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* ♻️ Reset System */}
-                <div className="bg-white p-6 shadow rounded-lg border">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                        <FaRecycle /> System Reset
+            <div className="max-w-7xl mx-auto px-6 py-10 space-y-12 text-gray-800 dark:text-gray-100">
+                {/* 📊 Overview */}
+                <section>
+                    <h3 className="text-lg font-semibold mb-4">
+                        📈 System Overview
                     </h3>
-                    <p className="text-gray-600 text-sm mt-1">
-                        Reset all data while keeping superadmin accounts or
-                        start completely fresh.
-                    </p>
-                    <div className="flex gap-3 mt-4">
-                        <select
-                            value={keepMode}
-                            onChange={(e) => setKeepMode(e.target.value)}
-                            className="border rounded px-3 py-2"
-                        >
-                            <option value="superadmin_only">
-                                Keep Superadmins Only
-                            </option>
-                            <option value="admins_and_superadmin">
-                                Keep Admins + Superadmins
-                            </option>
-                            <option value="none">Reset Everything</option>
-                        </select>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        {Object.entries(stats).map(([key, val]) => (
+                            <div
+                                key={key}
+                                className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center"
+                            >
+                                <h4 className="text-sm text-gray-500 dark:text-gray-400 capitalize">
+                                    {key.replace("_", " ")}
+                                </h4>
+                                <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-2">
+                                    {val ?? "—"}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                {/* 💰 Loan Maintenance + Reset System side-by-side */}
+                <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Loan Maintenance */}
+                    <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-md p-6">
+                        <h3 className="text-lg font-semibold mb-3">
+                            💰 Loan Maintenance
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                            Recalculate loan totals, interests, and payment
+                            statuses to ensure accurate figures.
+                        </p>
                         <button
-                            onClick={() => setShowConfirm(true)}
-                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2"
+                            onClick={handleRecalculate}
+                            disabled={loading}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50"
                         >
-                            <FaTrashAlt /> Reset Now
+                            🔁 Recalculate All Loans
                         </button>
                     </div>
-                </div>
-            </div>
 
-            {/* 🗑 Delete Modal */}
-            {showDeleteModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white p-6 rounded shadow-lg max-w-md w-full">
-                        <h3 className="text-lg font-semibold mb-2">
-                            Confirm Delete
+                    {/* Reset System */}
+                    <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-md p-6">
+                        <h3 className="text-lg font-semibold mb-4">
+                            🧨 Reset System
                         </h3>
-                        <p className="text-gray-600 mb-4">
-                            Are you sure you want to delete{" "}
-                            <b>{fileToDelete}</b>?
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowDeleteModal(false)}
-                                className="px-4 py-2 bg-gray-400 text-white rounded"
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                            <select
+                                value={resetMode}
+                                onChange={(e) => setResetMode(e.target.value)}
+                                className="border border-gray-300 dark:border-gray-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900"
                             >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmDeleteBackup}
-                                className="px-4 py-2 bg-red-600 text-white rounded"
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ♻️ Restore Modal */}
-            {showRestoreModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white p-6 rounded shadow-lg max-w-md w-full">
-                        <h3 className="text-lg font-semibold mb-3">
-                            Select Backup to Restore
-                        </h3>
-                        <select
-                            value={fileToRestore}
-                            onChange={(e) => setFileToRestore(e.target.value)}
-                            className="border rounded px-3 py-2 w-full mb-4"
-                        >
-                            <option value="">-- Choose File --</option>
-                            {backupFiles.map((b) => (
-                                <option key={b.file} value={b.file}>
-                                    {b.file} ({b.size})
+                                <option value="superadmin_only">
+                                    Keep Superadmin Only
                                 </option>
-                            ))}
-                        </select>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowRestoreModal(false)}
-                                className="px-4 py-2 bg-gray-400 text-white rounded"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmRestoreBackup}
-                                className="px-4 py-2 bg-green-600 text-white rounded"
-                            >
-                                Restore
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+                                <option value="admins_and_superadmin">
+                                    Keep Admins + Superadmin
+                                </option>
+                                <option value="keep_all_staff">
+                                    Keep All Staff (Admins + Staff + Superadmin)
+                                </option>
+                            </select>
 
-            {/* ⚠️ Confirm Reset Modal */}
-            {showConfirm && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white p-6 rounded shadow-lg max-w-md w-full">
-                        <h3 className="text-lg font-semibold mb-2 text-red-600">
-                            Confirm System Reset
-                        </h3>
-                        <p className="text-gray-600 mb-4">
-                            This will permanently delete data according to your
-                            selected mode.
-                        </p>
-                        <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => setShowConfirm(false)}
-                                className="px-4 py-2 bg-gray-400 text-white rounded"
+                                onClick={handleReset}
+                                disabled={loading}
+                                className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50"
                             >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmReset}
-                                className="px-4 py-2 bg-red-600 text-white rounded"
-                            >
-                                Confirm Reset
+                                🧨 Execute System Reset
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
-        </AuthenticatedLayout>
+                </section>
+
+                {/* 💾 Backup Management */}
+                <section className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-md p-6">
+                    <div className="flex justify-between items-center mb-4 gap-3">
+                        <h3 className="text-lg font-semibold">
+                            📦 Backup Management
+                        </h3>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={refreshBackups}
+                                disabled={loading}
+                                className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md disabled:opacity-50"
+                            >
+                                🔄 Refresh
+                            </button>
+                            <button
+                                onClick={handleBackup}
+                                disabled={loading}
+                                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md disabled:opacity-50"
+                            >
+                                💾 Create New Backup
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Upload + Restore */}
+                    <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-end mb-6">
+                        <div className="flex flex-col flex-1">
+                            <label className="text-sm mb-1">
+                                Select existing backup to restore
+                            </label>
+                            <select
+                                value={selectedBackup}
+                                onChange={(e) =>
+                                    setSelectedBackup(e.target.value)
+                                }
+                                className="border border-gray-300 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900"
+                            >
+                                <option value="">
+                                    -- Choose a backup file --
+                                </option>
+                                {localBackups.map((b, i) => (
+                                    <option key={i} value={b.file}>
+                                        {b.file} ({b.size})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col flex-1">
+                            <label className="text-sm mb-1">
+                                Upload new backup (.sql / .sqlite / .zip)
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="file"
+                                    accept=".zip,.sql,.sqlite"
+                                    onChange={handleUpload}
+                                    className="text-sm flex-1 border border-gray-300 rounded-md px-2 py-2 bg-white dark:bg-gray-900"
+                                />
+                                <button
+                                    onClick={submitUpload}
+                                    disabled={loading || !uploadFile}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md disabled:opacity-50"
+                                >
+                                    📤 Upload
+                                </button>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleRestore}
+                            disabled={loading}
+                            className="bg-yellow-600 hover:bg-yellow-700 text-white px-5 py-2 rounded-md disabled:opacity-50"
+                        >
+                            ♻️ Restore Backup
+                        </button>
+                    </div>
+
+                    {/* Backup List */}
+                    <AnimatePresence>
+                        {Array.isArray(localBackups) &&
+                        localBackups.length > 0 ? (
+                            localBackups.map((b) => (
+                                <motion.li
+                                    key={b.file}
+                                    initial={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    transition={{ duration: 0.25 }}
+                                    className="flex justify-between items-center py-2 text-sm border-t border-gray-200 dark:border-gray-700"
+                                >
+                                    <div>
+                                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                                            {b.file}
+                                        </span>
+                                        <span className="text-gray-500 ml-2">
+                                            {b.size} — {b.date}
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() =>
+                                            handleDeleteBackup(b.file)
+                                        }
+                                        className="text-red-600 hover:text-red-700 text-xs"
+                                    >
+                                        Delete
+                                    </button>
+                                </motion.li>
+                            ))
+                        ) : (
+                            <p className="text-gray-500 text-sm">
+                                No backups available yet.
+                            </p>
+                        )}
+                    </AnimatePresence>
+                </section>
+            </div>
+        </>
     );
 }

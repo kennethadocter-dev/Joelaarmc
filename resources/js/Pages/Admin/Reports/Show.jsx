@@ -1,8 +1,11 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, usePage, router } from "@inertiajs/react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import html2pdf from "html2pdf.js";
-import { route } from "ziggy-js"; // ✅ correct modern import // ✅ ensures compatibility for basePath use
+import Toast from "@/Components/Toast"; // Notification Toast
+
+// ❌ REMOVE THIS — IT BREAKS SUPERADMIN ROUTES
+// import { route } from "ziggy-js";
 
 // 💰 Currency formatter
 const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
@@ -17,14 +20,14 @@ const fmt = (d) =>
           })
         : "—";
 
-// 📈 Interest multiplier logic
+// ⭐ Interest multiplier logic
 function getEffectiveMultiplier(term, rate) {
     const base = rate / 100;
     const table = { 1: 1 + base, 2: 1.31, 3: 1.425, 4: 1.56, 5: 1.67, 6: 1.83 };
     return table[term] ?? 1 + base;
 }
 
-// 📅 Build repayment schedule
+// ⭐ Build repayment schedule
 function buildSchedule(amount, ratePct, term, startDate) {
     if (!amount || !ratePct || !term || !startDate) return [];
     const multiplier = getEffectiveMultiplier(term, ratePct);
@@ -50,7 +53,14 @@ export default function ReportShow() {
         csrf_token,
         basePath = "admin",
         auth = {},
+        settings,
+        flash = {},
     } = usePage().props;
+
+    const [toast, setToast] = useState({
+        message: flash?.success || flash?.error || "",
+        type: flash?.success ? "success" : flash?.error ? "error" : "success",
+    });
 
     if (!loan) {
         return (
@@ -63,7 +73,6 @@ export default function ReportShow() {
         );
     }
 
-    const user = auth?.user || {};
     const multiplier = getEffectiveMultiplier(
         loan.term_months,
         loan.interest_rate,
@@ -87,14 +96,18 @@ export default function ReportShow() {
         today.getDate(),
     )} day of ${today.toLocaleString("en-US", {
         month: "long",
-    })} ${today.getFullYear()} between Joelaar Micro-Credit Services (hereinafter referred to as the "Lender") and ${
+    })} ${today.getFullYear()} between Joelaar Micro-Credit Services and ${
         loan.client_name
-    } (hereinafter referred to as the "Borrower").`;
+    } (Borrower).`;
 
     /** 🖨 Print document */
     const handlePrint = () => {
         const element = document.getElementById("agreement-wrapper");
-        if (!element) return alert("⚠️ Agreement section not found!");
+        if (!element)
+            return setToast({
+                message: "⚠️ Agreement section not found!",
+                type: "error",
+            });
 
         const opt = {
             margin: 0.4,
@@ -103,23 +116,7 @@ export default function ReportShow() {
             jsPDF: { unit: "in", format: "A4", orientation: "portrait" },
         };
 
-        html2pdf()
-            .set(opt)
-            .from(element)
-            .toPdf()
-            .get("pdf")
-            .then((pdf) => {
-                const blob = pdf.output("blob");
-                const blobUrl = URL.createObjectURL(blob);
-                const iframe = document.createElement("iframe");
-                iframe.style.display = "none";
-                iframe.src = blobUrl;
-                document.body.appendChild(iframe);
-                iframe.onload = () => {
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                };
-            });
+        html2pdf().set(opt).from(element).save();
     };
 
     /** 💾 Download PDF file */
@@ -139,10 +136,37 @@ export default function ReportShow() {
     const handleRefresh = () => {
         try {
             router.reload({ only: ["loan", "guarantors"] });
-        } catch (err) {
-            console.error("Refresh failed:", err);
-            alert("⚠️ Could not refresh loan data.");
+            setToast({
+                message: "🔄 Loan data refreshed successfully.",
+                type: "success",
+            });
+        } catch {
+            setToast({
+                message: "⚠️ Could not refresh loan data.",
+                type: "error",
+            });
         }
+    };
+
+    /** 📧 Send Loan Agreement Email */
+    const handleSendEmail = () => {
+        router.post(
+            route(`${basePath}.reports.sendAgreement`, loan.id),
+            {},
+            {
+                preserveScroll: true,
+                onSuccess: () =>
+                    setToast({
+                        message: "📧 Loan Agreement email sent successfully!",
+                        type: "success",
+                    }),
+                onError: () =>
+                    setToast({
+                        message: "⚠️ Failed to send Loan Agreement email.",
+                        type: "error",
+                    }),
+            },
+        );
     };
 
     return (
@@ -155,8 +179,16 @@ export default function ReportShow() {
         >
             <Head title={`Loan Report #${loan.id}`} />
 
-            <div className="py-8 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 print:max-w-full print:px-8">
-                {/* 🔙 Top Bar */}
+            {toast.message && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast({ message: "", type: "success" })}
+                />
+            )}
+
+            <div className="py-8 max-w-4xl mx-auto px-4 space-y-8">
+                {/* Top Bar */}
                 <div className="flex justify-between items-center no-print">
                     <Link
                         href={route(`${basePath}.reports.index`)}
@@ -174,32 +206,16 @@ export default function ReportShow() {
                         </button>
                         <button
                             onClick={handleDownload}
-                            className="px-4 py-2 bg-gray-600 text-white rounded-md shadow hover:bg-gray-700 transition"
+                            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition shadow"
                         >
                             ⬇ Download
                         </button>
-
-                        <form
-                            method="post"
-                            action={route(
-                                `${basePath}.reports.sendAgreement`,
-                                loan.id,
-                            )}
-                            className="inline"
+                        <button
+                            onClick={handleSendEmail}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition shadow"
                         >
-                            <input
-                                type="hidden"
-                                name="_token"
-                                value={csrf_token}
-                            />
-                            <button
-                                type="submit"
-                                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition shadow"
-                            >
-                                📧 Send Email
-                            </button>
-                        </form>
-
+                            📧 Send Email
+                        </button>
                         <button
                             onClick={handleRefresh}
                             className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow"
@@ -209,7 +225,7 @@ export default function ReportShow() {
                     </div>
                 </div>
 
-                {/* 📝 Agreement */}
+                {/* AGREEMENT BODY */}
                 <div
                     id="agreement-wrapper"
                     className="bg-white text-black p-6 rounded-lg shadow-md border border-gray-200"
@@ -227,7 +243,8 @@ export default function ReportShow() {
                             />
                             <div>
                                 <h1 className="text-xl font-bold uppercase tracking-wide text-gray-800">
-                                    Joelaar Micro-Credit Services
+                                    {settings?.company_name ||
+                                        "Joelaar Micro-Credit Services"}
                                 </h1>
                                 <p className="text-sm text-gray-600 italic">
                                     Empowering Growth Responsibly
@@ -251,8 +268,11 @@ export default function ReportShow() {
                         </h2>
                         <p className="text-gray-600 mt-1 text-sm">
                             Between{" "}
-                            <strong>Joelaar Micro-Credit Services</strong> and{" "}
-                            <strong>{loan.client_name}</strong>
+                            <strong>
+                                {settings?.company_name ||
+                                    "Joelaar Micro-Credit Services"}
+                            </strong>{" "}
+                            and <strong>{loan.client_name}</strong>
                         </p>
                     </div>
 
@@ -329,57 +349,7 @@ export default function ReportShow() {
                         </table>
                     </section>
 
-                    <section className="space-y-4 mt-6 text-gray-800">
-                        <h3 className="font-semibold text-lg">
-                            CLAUSE 5: PENALTY
-                        </h3>
-                        <p>
-                            A penalty of <strong>0.5% per day</strong> applies
-                            for late payment.
-                        </p>
-
-                        <h3 className="font-semibold text-lg">
-                            CLAUSE 6: DEFAULT
-                        </h3>
-                        <p>
-                            Failure to comply with Clause 4 renders the Borrower
-                            in default.
-                        </p>
-
-                        <h3 className="font-semibold text-lg">
-                            CLAUSE 7: SECURITY
-                        </h3>
-                        <p>
-                            The Borrower hypothecates present and future stock
-                            as security.
-                        </p>
-
-                        <h3 className="font-semibold text-lg">
-                            CLAUSE 8: GUARANTORS
-                        </h3>
-                        <p>
-                            Guarantors are personally liable for all unpaid
-                            balances.
-                        </p>
-
-                        {guarantors?.length > 0 && (
-                            <div className="mt-4">
-                                <h4 className="font-semibold">Guarantors:</h4>
-                                <ul className="list-disc pl-6 mt-2 space-y-1">
-                                    {guarantors.map((g) => (
-                                        <li key={g.id}>
-                                            <strong>{g.name}</strong> —{" "}
-                                            {g.occupation || "N/A"},{" "}
-                                            {g.residence || "N/A"} —{" "}
-                                            {g.contact || "No contact"}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                    </section>
-
-                    {/* ✍ Signatures */}
+                    {/* SIGNATURES */}
                     <section className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-10">
                         <div>
                             <div className="h-12 border-b border-gray-400"></div>
@@ -402,24 +372,15 @@ export default function ReportShow() {
                         </div>
                     </section>
 
-                    <div className="mt-6 text-sm">
-                        <strong>Bank Account Number:</strong>{" "}
-                        {loan.customer?.bank_account ||
-                            "____________________________"}
-                    </div>
-
                     <footer className="mt-12 border-t border-gray-400 pt-3 text-center text-xs text-gray-600">
                         <p>
-                            <strong>Joelaar Micro-Credit Services</strong> |
-                            Bolgatanga, Ghana | Tel:
-                            <span className="text-gray-700">
-                                {" "}
-                                +233 24 123 4567{" "}
-                            </span>
-                            | Email:{" "}
-                            <span className="text-gray-700">
-                                info@joelaarcredit.com
-                            </span>
+                            <strong>
+                                {settings?.company_name ||
+                                    "Joelaar Micro-Credit Services"}
+                            </strong>{" "}
+                            | {settings?.address || "Bolgatanga, Ghana"} | Tel:{" "}
+                            {settings?.phone || "+233 24 123 4567"} | Email:{" "}
+                            {settings?.email || "info@joelaarcredit.com"}
                         </p>
                         <p className="mt-1 italic text-gray-500">
                             “This document is system-generated and valid without
@@ -429,9 +390,10 @@ export default function ReportShow() {
                 </div>
             </div>
 
+            {/* PRINT STYLES */}
             <style>{`
               @media print {
-                header, nav, footer.no-print, aside, [data-sidebar], [data-header] {
+                header, nav, aside, .no-print {
                   display: none !important;
                 }
                 #agreement-wrapper {

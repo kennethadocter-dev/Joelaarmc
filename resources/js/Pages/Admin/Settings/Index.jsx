@@ -1,63 +1,10 @@
-import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
+import AuthenticatedLayout, { useConfirm } from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, usePage, router } from "@inertiajs/react";
-import { useEffect, useState } from "react";
-
-// ✅ Simple toast component
-function Toast({ message, type, onClose }) {
-    if (!message) return null;
-    return (
-        <div
-            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded shadow-lg text-white transition-all duration-300 ${
-                type === "error" ? "bg-red-600" : "bg-green-600"
-            }`}
-        >
-            <div className="flex items-center gap-3">
-                <span>{message}</span>
-                <button
-                    onClick={onClose}
-                    className="text-white hover:text-gray-200 font-bold"
-                >
-                    ×
-                </button>
-            </div>
-        </div>
-    );
-}
-
-// ✅ Confirmation modal
-function ConfirmModal({ show, onConfirm, onCancel }) {
-    if (!show) return null;
-    return (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full text-center">
-                <h2 className="text-lg font-semibold text-gray-800 mb-3">
-                    ⚠️ Confirm Reset
-                </h2>
-                <p className="text-gray-600 mb-6">
-                    Are you sure you want to reset all settings to their default
-                    values? This action cannot be undone.
-                </p>
-                <div className="flex justify-center gap-4">
-                    <button
-                        onClick={onCancel}
-                        className="px-4 py-2 rounded bg-gray-300 text-gray-800 hover:bg-gray-400 transition"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={onConfirm}
-                        className="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition"
-                    >
-                        Yes, Reset
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
+import { useEffect } from "react";
 
 export default function SettingsIndex() {
     const { settings, flash, basePath } = usePage().props;
+    const confirm = useConfirm();
 
     const { data, setData, post, processing, errors } = useForm({
         company_name: settings.company_name || "",
@@ -76,48 +23,46 @@ export default function SettingsIndex() {
         _method: "put",
     });
 
-    const [toast, setToast] = useState({ message: "", type: "success" });
-    const [showConfirm, setShowConfirm] = useState(false);
-
-    const showToast = (message, type = "success") => {
-        setToast({ message, type });
-        setTimeout(() => setToast({ message: "", type: "success" }), 3500);
-    };
-
+    // ✅ Submit form
     const submit = (e) => {
         e.preventDefault();
         post(route(`${basePath}.settings.update`), {
             forceFormData: true,
             onSuccess: () =>
-                showToast("✅ Settings saved successfully!", "success"),
-            onError: () => showToast("⚠️ Failed to save settings.", "error"),
+                window.toast?.success?.("✅ Settings saved successfully!"),
+            onError: () => window.toast?.error?.("⚠️ Failed to save settings."),
         });
     };
 
+    // ♻️ Reset settings
     const handleReset = () => {
-        router.put(
-            route(`${basePath}.settings.reset`),
-            {},
-            {
-                onSuccess: () => {
-                    setShowConfirm(false);
-                    showToast(
-                        "🔁 Settings reset to default values!",
-                        "success",
-                    );
-                },
-                onError: () => {
-                    setShowConfirm(false);
-                    showToast("❌ Failed to reset settings.", "error");
-                },
+        confirm(
+            "Confirm Reset",
+            "Are you sure you want to reset all settings to default values? This action cannot be undone.",
+            () => {
+                router.put(
+                    route(`${basePath}.settings.reset`),
+                    {},
+                    {
+                        onSuccess: () =>
+                            window.toast?.success?.(
+                                "🔁 Settings reset to default values!",
+                            ),
+                        onError: () =>
+                            window.toast?.error?.(
+                                "❌ Failed to reset settings.",
+                            ),
+                    },
+                );
             },
+            "danger",
         );
     };
 
-    // 🎉 Flash messages on page load
+    // 🎉 Flash messages
     useEffect(() => {
-        if (flash?.success) showToast(flash.success, "success");
-        if (flash?.error) showToast(flash.error, "error");
+        if (flash?.success) window.toast?.success?.(flash.success);
+        if (flash?.error) window.toast?.error?.(flash.error);
     }, [flash]);
 
     return (
@@ -129,20 +74,10 @@ export default function SettingsIndex() {
             }
         >
             <Head title="Settings" />
-            <Toast
-                message={toast.message}
-                type={toast.type}
-                onClose={() => setToast({ message: "", type: "success" })}
-            />
-            <ConfirmModal
-                show={showConfirm}
-                onConfirm={handleReset}
-                onCancel={() => setShowConfirm(false)}
-            />
 
             <div className="py-8 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
                 <form onSubmit={submit} className="space-y-8">
-                    {/* Organization Info */}
+                    {/* 🏢 Organization Info */}
                     <section className="bg-white shadow rounded-lg p-6 space-y-4 border border-gray-200">
                         <h3 className="font-semibold text-lg border-b border-gray-300 pb-2 text-gray-800">
                             Organization Info
@@ -182,7 +117,7 @@ export default function SettingsIndex() {
                         </div>
                     </section>
 
-                    {/* Loan Defaults */}
+                    {/* 💰 Loan Defaults */}
                     <section className="bg-white shadow rounded-lg p-6 space-y-4 border border-gray-200">
                         <h3 className="font-semibold text-lg border-b border-gray-300 pb-2 text-gray-800">
                             Loan Defaults
@@ -240,11 +175,11 @@ export default function SettingsIndex() {
                         </div>
                     </section>
 
-                    {/* Buttons */}
+                    {/* 🔘 Buttons */}
                     <div className="flex justify-between items-center">
                         <button
                             type="button"
-                            onClick={() => setShowConfirm(true)}
+                            onClick={handleReset}
                             className="px-6 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition shadow"
                         >
                             ♻️ Reset to Defaults
@@ -264,7 +199,7 @@ export default function SettingsIndex() {
     );
 }
 
-// ✅ Helper component for numeric inputs
+/* ✅ Helper component for numeric inputs */
 function InputNumber({ label, field, data, setData, errors }) {
     return (
         <div>

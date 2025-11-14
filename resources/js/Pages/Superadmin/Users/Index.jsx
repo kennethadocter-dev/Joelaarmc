@@ -1,90 +1,100 @@
 import AuthenticatedLayout, { useConfirm } from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, usePage, router } from "@inertiajs/react";
 import { useState } from "react";
-import { toast } from "react-hot-toast"; // ✅ Toast notifications
 
 export default function UsersIndex() {
-    const { users, flash, counts, filters } = usePage().props;
+    const { users, counts, filters, auth } = usePage().props;
+    const currentUser = auth?.user || {};
+    const role = currentUser.role || "superadmin";
+
+    // ✅ Determine correct route prefix
+    const basePath =
+        role === "superadmin"
+            ? "superadmin"
+            : role === "admin"
+              ? "admin"
+              : "staff";
+
     const [search, setSearch] = useState(filters?.q || "");
     const [roleFilter, setRoleFilter] = useState(filters?.role || "");
+    const [sortField, setSortField] = useState(filters?.sort || "created_at");
+    const [sortDirection, setSortDirection] = useState(
+        filters?.direction || "desc",
+    );
+
     const confirm = useConfirm();
 
-    // 🔍 Handle search
-    const handleSearch = (e) => {
-        e.preventDefault();
-        router.get(
-            "/admin/users",
-            { q: search, role: roleFilter },
-            { preserveScroll: true },
-        );
+    // 🔁 Reload users dynamically
+    const reloadUsers = (params = {}) => {
+        router.get(`/${basePath}/users`, params, { preserveScroll: true });
     };
 
-    // 🎯 Handle role filter toggle
+    // 🔍 Search users
+    const handleSearch = (e) => {
+        e.preventDefault();
+        reloadUsers({ q: search, role: roleFilter });
+    };
+
+    // 🎯 Filter by role
     const handleFilter = (role) => {
         const newRole = roleFilter === role ? "" : role;
         setRoleFilter(newRole);
-        router.get(
-            "/admin/users",
-            { q: search, role: newRole },
-            { preserveScroll: true },
-        );
+        reloadUsers({ q: search, role: newRole });
+    };
+
+    // 🧭 Sort users
+    const handleSort = (field) => {
+        let direction = "asc";
+        if (sortField === field && sortDirection === "asc") direction = "desc";
+        setSortField(field);
+        setSortDirection(direction);
+        reloadUsers({ q: search, role: roleFilter, sort: field, direction });
     };
 
     // 🔁 Resend credentials
-    const handleResend = (userId) => {
+    const handleResend = (id) =>
         confirm(
             "Resend Login Details",
-            "Are you sure you want to resend login credentials to this user?",
-            () => {
+            "Do you want to resend login credentials to this user?",
+            () =>
                 router.post(
-                    `/admin/users/${userId}/resend`,
+                    route(`${basePath}.users.resendCredentials`, id),
                     {},
                     {
                         preserveScroll: true,
-                        onSuccess: () =>
-                            toast.success(
-                                "✅ Login credentials resent successfully!",
-                            ),
-                        onError: () =>
-                            toast.error(
-                                "❌ Failed to resend login credentials.",
-                            ),
+                        onSuccess: () => {}, // handled by global toast
+                        onError: () => {},
                     },
-                );
-            },
+                ),
             "warning",
         );
-    };
 
-    // 🗑️ Delete user
-    const handleDelete = (userId) => {
+    // 🗑 Delete user
+    const handleDelete = (id) =>
         confirm(
             "Delete User",
-            "This will permanently delete the user and cannot be undone.",
-            () => {
-                router.delete(`/admin/users/${userId}`, {
+            "This will permanently delete the user. Proceed?",
+            () =>
+                router.delete(route(`${basePath}.users.destroy`, id), {
                     preserveScroll: true,
-                    onSuccess: () =>
-                        toast.success("✅ User deleted successfully!"),
-                    onError: () => toast.error("❌ Failed to delete user."),
-                });
-            },
+                    onSuccess: () => {}, // handled globally
+                    onError: () => {},
+                }),
             "danger",
         );
-    };
 
-    // 🎨 Role card styles
+    // 🎨 Role cards and styles
     const roleStyles = {
         superadmin: {
             gradient: "from-purple-700 to-indigo-700",
             icon: "👑",
-            label: "Super Admins",
+            label: "Super Admin",
             count: counts?.superadmin || 0,
         },
         admin: {
             gradient: "from-blue-700 to-sky-600",
             icon: "🧭",
-            label: "Admins",
+            label: "Admin",
             count: counts?.admin || 0,
         },
         staff: {
@@ -95,65 +105,77 @@ export default function UsersIndex() {
         },
         user: {
             gradient: "from-gray-700 to-gray-500",
-            icon: "👥",
-            label: "Users",
+            icon: "👤",
+            label: "User / Customers",
             count: counts?.user || 0,
         },
     };
 
-    const roleColor = (role) => {
-        switch (role) {
-            case "superadmin":
-                return "bg-purple-200 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
-            case "admin":
-                return "bg-blue-200 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
-            case "staff":
-                return "bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200";
-            case "user":
-                return "bg-gray-200 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
-            default:
-                return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
-        }
-    };
+    // 🎨 Badge color
+    const roleColor = (role, isCustomer = false) =>
+        isCustomer
+            ? "bg-amber-500 role-badge"
+            : {
+                  superadmin: "bg-purple-600 role-badge",
+                  admin: "bg-blue-600 role-badge",
+                  staff: "bg-green-600 role-badge",
+                  user: "bg-gray-600 role-badge",
+              }[role] || "bg-gray-500 role-badge";
+
+    const SortIcon = ({ field }) =>
+        sortField === field ? (
+            <span className="ml-1 text-xs">
+                {sortDirection === "asc" ? "▲" : "▼"}
+            </span>
+        ) : null;
 
     return (
         <AuthenticatedLayout
-            header={<h2 className="text-xl font-semibold">Manage Users</h2>}
+            header={
+                <h2 className="text-xl font-semibold text-white">
+                    Manage Users (
+                    {role === "superadmin" ? "Superadmin" : "Admin"})
+                </h2>
+            }
         >
             <Head title="Manage Users" />
 
             <div className="py-6 max-w-7xl mx-auto space-y-6">
-                {/* 🔹 Header */}
+                {/* Header */}
                 <div className="flex justify-between items-center">
-                    <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
-                        Manage Users
+                    <h3 className="font-semibold text-lg text-white">
+                        Manage Users ({role})
                     </h3>
-                    <Link
-                        href="/admin/users/create"
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                    >
-                        ➕ Add User
-                    </Link>
+                    {role === "superadmin" && (
+                        <Link
+                            href={route(`${basePath}.users.create`)}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                        >
+                            ➕ Add User
+                        </Link>
+                    )}
                 </div>
 
                 {/* 🌈 Role Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                     {Object.entries(roleStyles).map(
-                        ([role, { gradient, icon, label, count }]) => (
+                        ([r, { gradient, icon, label, count }]) => (
                             <button
-                                key={role}
-                                onClick={() => handleFilter(role)}
-                                className={`relative rounded-xl text-left p-5 shadow-md transition transform hover:scale-[1.03] hover:shadow-lg 
-                                bg-gradient-to-br ${gradient} text-white 
-                                ${roleFilter === role ? "ring-4 ring-offset-2 ring-white dark:ring-blue-400" : ""}`}
+                                key={r}
+                                onClick={() => handleFilter(r)}
+                                className={`rounded-xl text-left p-5 transition transform bg-gradient-to-br ${gradient} shadow-md hover:scale-105 hover:shadow-lg text-white ${
+                                    roleFilter === r
+                                        ? "ring-4 ring-offset-2 ring-offset-gray-100 scale-105 shadow-xl animate-pulse"
+                                        : ""
+                                }`}
                             >
                                 <div className="flex items-center justify-between">
                                     <span className="text-4xl">{icon}</span>
-                                    <h2 className="text-3xl font-bold">
+                                    <h2 className="text-3xl font-bold text-white">
                                         {count}
                                     </h2>
                                 </div>
-                                <p className="mt-2 text-sm tracking-wide uppercase opacity-90">
+                                <p className="mt-2 text-sm uppercase font-semibold text-white">
                                     {label}
                                 </p>
                             </button>
@@ -161,18 +183,18 @@ export default function UsersIndex() {
                     )}
                 </div>
 
-                {/* 🔍 Search Bar */}
+                {/* 🔍 Search */}
                 <form onSubmit={handleSearch} className="flex gap-3 mt-6">
                     <input
                         type="text"
                         placeholder="Search by name, email or phone..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="flex-1 border border-gray-400 dark:border-gray-600 bg-white dark:bg-gray-900 rounded-md px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="flex-1 border border-gray-400 dark:border-gray-600 bg-white dark:bg-gray-900 rounded-md px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
                     <button
                         type="submit"
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-md"
                     >
                         Search
                     </button>
@@ -191,73 +213,136 @@ export default function UsersIndex() {
                                     "Role",
                                     "Created",
                                     "Actions",
-                                ].map((h) => (
+                                ].map((h, idx) => (
                                     <th
                                         key={h}
-                                        className="px-4 py-3 text-left text-sm font-semibold text-gray-800 dark:text-gray-100"
+                                        onClick={() =>
+                                            [
+                                                "Name",
+                                                "Email",
+                                                "Phone",
+                                                "Role",
+                                                "Created",
+                                            ].includes(h)
+                                                ? handleSort(
+                                                      h
+                                                          .toLowerCase()
+                                                          .replace(" ", "_"),
+                                                  )
+                                                : null
+                                        }
+                                        className={`px-4 py-3 text-left text-sm font-semibold text-gray-800 dark:text-white ${
+                                            idx > 0 && idx < 6
+                                                ? "cursor-pointer select-none"
+                                                : ""
+                                        }`}
                                     >
                                         {h}
+                                        {idx > 0 && idx < 6 && (
+                                            <SortIcon
+                                                field={h
+                                                    .toLowerCase()
+                                                    .replace(" ", "_")}
+                                            />
+                                        )}
                                     </th>
                                 ))}
                             </tr>
                         </thead>
+
                         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                             {users.length ? (
-                                users.map((user, i) => (
-                                    <tr
-                                        key={user.id}
-                                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition"
-                                    >
-                                        <td className="px-4 py-2 text-sm">
-                                            {i + 1}
-                                        </td>
-                                        <td className="px-4 py-2 text-sm font-medium">
-                                            {user.name}
-                                        </td>
-                                        <td className="px-4 py-2 text-sm">
-                                            {user.email || "—"}
-                                        </td>
-                                        <td className="px-4 py-2 text-sm">
-                                            {user.phone || "—"}
-                                        </td>
-                                        <td className="px-4 py-2">
-                                            <span
-                                                className={`px-2 py-1 rounded-full text-xs font-semibold ${roleColor(user.role)}`}
-                                            >
-                                                {user.role}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-2 text-sm">
-                                            {new Date(
-                                                user.created_at,
-                                            ).toLocaleDateString()}
-                                        </td>
-                                        <td className="px-4 py-2 flex flex-wrap gap-3 text-sm">
-                                            <Link
-                                                href={`/admin/users/${user.id}/edit`}
-                                                className="text-blue-600 dark:text-blue-400 hover:underline"
-                                            >
-                                                Edit
-                                            </Link>
-                                            <button
-                                                onClick={() =>
-                                                    handleResend(user.id)
-                                                }
-                                                className="text-yellow-600 dark:text-yellow-400 hover:underline"
-                                            >
-                                                Resend Login
-                                            </button>
-                                            <button
-                                                onClick={() =>
-                                                    handleDelete(user.id)
-                                                }
-                                                className="text-red-600 dark:text-red-400 hover:underline"
-                                            >
-                                                Delete
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
+                                users.map((u, i) => {
+                                    const isCustomer =
+                                        u.role === "user" &&
+                                        !u.email?.includes("@jlmc") &&
+                                        !u.email?.includes("admin") &&
+                                        !u.email?.includes("staff");
+
+                                    const displayRole = isCustomer
+                                        ? "Customer"
+                                        : u.role.charAt(0).toUpperCase() +
+                                          u.role.slice(1);
+
+                                    return (
+                                        <tr
+                                            key={u.id}
+                                            className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition"
+                                        >
+                                            <td className="px-4 py-2 text-sm text-gray-800 dark:text-white">
+                                                {i + 1}
+                                            </td>
+                                            <td className="px-4 py-2 text-sm font-medium flex items-center gap-2 text-gray-800 dark:text-white">
+                                                <span>{u.name}</span>
+                                            </td>
+                                            <td className="px-4 py-2 text-sm text-gray-800 dark:text-white">
+                                                {u.email || "—"}
+                                            </td>
+                                            <td className="px-4 py-2 text-sm text-gray-800 dark:text-white">
+                                                {u.phone || "—"}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                <span
+                                                    className={`role-badge px-3 py-1 rounded-full text-xs uppercase tracking-wide ${roleColor(
+                                                        u.role,
+                                                        isCustomer,
+                                                    )}`}
+                                                >
+                                                    {displayRole}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-2 text-sm text-gray-800 dark:text-white">
+                                                {new Date(
+                                                    u.created_at,
+                                                ).toLocaleDateString()}
+                                            </td>
+                                            <td className="px-4 py-2 flex flex-wrap gap-3 text-sm">
+                                                {isCustomer ? (
+                                                    <span className="text-gray-400 italic">
+                                                        View Only
+                                                    </span>
+                                                ) : (
+                                                    <>
+                                                        <Link
+                                                            href={route(
+                                                                `${basePath}.users.edit`,
+                                                                u.id,
+                                                            )}
+                                                            className="text-blue-500 hover:text-blue-300 font-semibold"
+                                                        >
+                                                            Edit
+                                                        </Link>
+                                                        {role ===
+                                                            "superadmin" && (
+                                                            <>
+                                                                <button
+                                                                    onClick={() =>
+                                                                        handleResend(
+                                                                            u.id,
+                                                                        )
+                                                                    }
+                                                                    className="text-yellow-400 hover:text-yellow-300 font-semibold"
+                                                                >
+                                                                    Resend Login
+                                                                </button>
+                                                                <button
+                                                                    onClick={() =>
+                                                                        handleDelete(
+                                                                            u.id,
+                                                                        )
+                                                                    }
+                                                                    className="text-red-500 hover:text-red-300 font-semibold"
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             ) : (
                                 <tr>
                                     <td

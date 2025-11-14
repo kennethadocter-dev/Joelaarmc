@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Loan Agreement – Joelaar Micro-Credit Services</title>
     <style>
         body {
@@ -9,6 +10,7 @@
             color: #222;
             background: #f9f9f9;
             padding: 30px;
+            margin: 0;
         }
         .container {
             background: #fff;
@@ -26,9 +28,6 @@
         }
         .header img {
             height: 50px;
-        }
-        .header-text {
-            line-height: 1.2;
         }
         .header-text h2 {
             margin: 0;
@@ -75,6 +74,10 @@
             color: #888;
             font-style: italic;
         }
+        a {
+            color: #2563eb;
+            text-decoration: none;
+        }
     </style>
 </head>
 <body>
@@ -90,10 +93,12 @@
 
     <h1>Loan Agreement</h1>
 
-    <p>Dear {{ $loan->client_name }},</p>
+    <p>Dear <strong>{{ $loan->client_name }}</strong>,</p>
 
-    <p>Attached to this email is your official <strong>Loan Agreement</strong> from
-    <strong>Joelaar Micro-Credit Services</strong>.</p>
+    <p>
+        Attached to this email is your official <strong>Loan Agreement</strong> from
+        <strong>Joelaar Micro-Credit Services</strong>.
+    </p>
 
     <div class="summary">
         <p><strong>Loan ID:</strong> #{{ $loan->id }}</p>
@@ -105,14 +110,17 @@
 
     <p>Please review the attached document carefully and keep it for your records.</p>
 
-    <p>Thank you for choosing Joelaar Micro-Credit Services.<br>
-    If you have any questions, reply to this email or visit our office.</p>
+    <p>
+        Thank you for choosing <strong>Joelaar Micro-Credit Services</strong>.<br>
+        If you have any questions, simply reply to this email or visit our office.
+    </p>
 
     <div class="footer">
         <strong>Joelaar Micro-Credit Services</strong><br>
         Bolgatanga, Ghana<br>
         Tel: +233 24 123 4567<br>
-        Email: info@joelaarcredit.com
+        Email: <a href="mailto:info@joelaarcredit.com">info@joelaarcredit.com</a>
+
         <div class="disclaimer">
             “This document is system-generated and valid without signature.”
         </div>

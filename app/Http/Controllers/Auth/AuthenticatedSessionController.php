@@ -3,79 +3,132 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Auth\LoginRequest;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
-use Inertia\Response;
 
 class AuthenticatedSessionController extends Controller
 {
     /**
-     * Display the login view.
+     * ---------------------------------------------------------
+     * SHOW LOGIN PAGE
+     * ---------------------------------------------------------
+     * If user is logged in → redirect safely.
+     * If not → show login page (no redirects).
      */
-    public function create(): Response
+    public function create()
     {
-        // 🔒 If already logged in, redirect to correct dashboard
-        if (auth()->check()) {
-            $user = auth()->user();
+        // INTERNAL USERS (superadmin, admin, staff)
+        if (Auth::guard('web')->check()) {
+            $user = Auth::guard('web')->user();
 
             if ($user->is_super_admin || $user->role === 'superadmin') {
                 return redirect()->route('superadmin.dashboard');
             }
 
-            if (in_array($user->role, ['admin', 'staff'])) {
-                return redirect()->route('admin.dashboard');
-            }
-
-            return redirect()->route('user.dashboard', [
-                'username' => $user->username ?? $user->id,
-            ]);
+            return redirect()->route('admin.dashboard');
         }
 
-        // 🧭 Normal login page
+        // ALWAYS SHOW LOGIN FOR NON-AUTH USERS
         return Inertia::render('Auth/Login', [
-            'canResetPassword' => Route::has('password.request'),
+            'canResetPassword' => false,
             'status' => session('status'),
         ]);
     }
 
+
     /**
-     * Handle an incoming authentication request.
+     * ---------------------------------------------------------
+     * LOGIN HANDLER
+     * ---------------------------------------------------------
+     * Supports staff login by username or email.
      */
-    public function store(LoginRequest $request): RedirectResponse
+    public function store(Request $request): RedirectResponse
     {
-        $request->authenticate();
-        $request->session()->regenerate();
+        $request->validate([
+            'login'    => ['required', 'string'],
+            'password' => ['required', 'string'],
+        ]);
 
-        $user = $request->user();
+        $loginInput = $request->input('login');
+        $password   = $request->input('password');
 
-        // 🚀 Redirect based on role immediately after login
-        if ($user->is_super_admin || $user->role === 'superadmin') {
-            return redirect()->route('superadmin.dashboard');
+        /**
+         * INTERNAL USERS LOGIN
+         */
+        if (filter_var($loginInput, FILTER_VALIDATE_EMAIL)) {
+            $credentials = ['email' => $loginInput, 'password' => $password];
+        } else {
+            // Change "username" to "name" if that’s what your users table uses.
+            $credentials = ['name' => $loginInput, 'password' => $password];
         }
 
-        if (in_array($user->role, ['admin', 'staff'])) {
-            return redirect()->route('admin.dashboard');
+        if (Auth::guard('web')->attempt($credentials, $request->boolean('remember'))) {
+            $request->session()->regenerate();
+
+            $user = Auth::guard('web')->user();
+
+            if ($user->is_super_admin || $user->role === 'superadmin') {
+                return redirect()->intended(route('superadmin.dashboard'));
+            }
+
+            return redirect()->intended(route('admin.dashboard'));
         }
 
-        return redirect()->route('user.dashboard', [
-            'username' => $user->username ?? $user->id,
+
+        /**
+         * CUSTOMER LOGIN (DISABLED TO AVOID LOGIN LOOP CONFLICTS)
+         *
+         * Enable only when customer portal is active.
+         *
+         * Example:
+         *
+         * $customer = Customer::where('email', $loginInput)
+         *                    ->orWhere('phone', $loginInput)
+         *                    ->first();
+         *
+         * if ($customer && Hash::check($password, $customer->password)) {
+         *     Auth::guard('customer')->login($customer);
+         *     $request->session()->regenerate();
+         *     return redirect('/customer/dashboard');
+         * }
+         */
+
+
+        /**
+         * INVALID LOGIN
+         */
+        return back()->withErrors([
+            'login' => 'Invalid username/email or password.',
         ]);
     }
 
+
     /**
-     * Destroy an authenticated session.
+     * ---------------------------------------------------------
+     * LOGOUT HANDLER
+     * ---------------------------------------------------------
+     * Clears both guards + regenerates token.
      */
     public function destroy(Request $request): RedirectResponse
     {
-        Auth::guard('web')->logout();
+        // Logout internal staff/admin/superadmin
+        if (Auth::guard('web')->check()) {
+            Auth::guard('web')->logout();
+        }
 
+        // Logout customers (if active)
+        if (Auth::guard('customer')->check()) {
+            Auth::guard('customer')->logout();
+        }
+
+        // Destroy session
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect('/');
+        return redirect()->route('login');
     }
 }

@@ -3,7 +3,7 @@ import forms from "@tailwindcss/forms";
 
 /** @type {import('tailwindcss').Config} */
 export default {
-    darkMode: "class", // ✅ stays in light mode unless toggled manually
+    darkMode: "class", // stays in light mode unless toggled manually
 
     content: [
         "./vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php",
@@ -100,7 +100,8 @@ export default {
 
     plugins: [
         forms,
-        // Optional plugin for smoother transitions without flicker
+
+        // 🧩 Global transition and rendering optimization plugin (modified)
         function ({ addBase }) {
             addBase({
                 "*, ::before, ::after": {
@@ -109,8 +110,15 @@ export default {
                     transitionTimingFunction: "ease-in-out",
                     transitionDuration: "150ms",
                     backfaceVisibility: "hidden",
-                    WebkitFontSmoothing: "antialiased",
                     transform: "translateZ(0)",
+                },
+
+                /* ✅ Brighten white text inside dark areas */
+                ".bg-gray-800 *, .bg-gray-900 *": {
+                    color: "#ffffff !important",
+                    opacity: "1 !important",
+                    filter: "brightness(1.3)",
+                    WebkitFontSmoothing: "auto !important", // restore crisp edges
                 },
             });
         },

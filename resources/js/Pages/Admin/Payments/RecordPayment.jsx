@@ -1,7 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, usePage, Link, router } from "@inertiajs/react";
-import { useEffect, useRef } from "react";
-import { toast, Toaster } from "react-hot-toast";
+import { useEffect } from "react";
 
 export default function RecordPayment() {
     const {
@@ -10,47 +9,44 @@ export default function RecordPayment() {
         auth,
         flash = {},
         basePath = "admin",
-        redirect, // ✅ Comes from backend props (PaymentController@create)
+        redirect,
     } = usePage().props;
 
     const { data, setData, post, processing, errors, reset } = useForm({
         loan_id: loan?.id || "",
         amount: expectedAmount || "",
         note: "",
-        redirect: redirect || `/${basePath}/loans/${loan?.id}`, // ✅ auto fallback
+        redirect: redirect || route(`${basePath}.loans.show`, loan?.id),
     });
 
-    const toastShown = useRef(false);
-
-    // ✅ Handle Laravel flash messages (on reload/redirect)
+    /* ✅ Flash messages on load */
     useEffect(() => {
-        if (!toastShown.current) {
-            if (flash.success) {
-                toast.success(flash.success);
-                toastShown.current = true;
-            } else if (flash.error) {
-                toast.error(flash.error);
-                toastShown.current = true;
-            }
-        }
+        if (flash?.success) window.toast?.success?.(flash.success);
+        if (flash?.error) window.toast?.error?.(flash.error);
     }, [flash]);
 
-    // ✅ Submit handler
+    /* 💾 Submit payment */
     const submit = (e) => {
         e.preventDefault();
+        if (processing) return;
 
-        post(`/${basePath}/payments/store`, {
+        post(route(`${basePath}.payments.store`), {
             preserveScroll: true,
             onSuccess: () => {
-                toast.success("✅ Cash payment recorded successfully!");
+                window.toast?.success?.(
+                    "✅ Cash payment recorded successfully!",
+                );
                 reset("note", "amount");
                 setTimeout(() => {
-                    router.visit(data.redirect); // ✅ redirect back to loan page
-                }, 800);
+                    router.visit(data.redirect);
+                }, 1000);
             },
             onError: (err) => {
-                console.error("❌ Payment error:", err);
-                toast.error("⚠️ Failed to record payment. Please try again.");
+                const firstError =
+                    err && Object.keys(err).length
+                        ? Object.values(err)[0]
+                        : "⚠️ Failed to record payment. Please try again.";
+                window.toast?.error?.(firstError);
             },
         });
     };
@@ -64,7 +60,6 @@ export default function RecordPayment() {
             }
         >
             <Head title="Record Cash Payment" />
-            <Toaster position="top-right" />
 
             <div className="max-w-2xl mx-auto bg-white shadow-md rounded-lg p-6 space-y-6 border border-gray-100 mt-6">
                 {/* 🡨 Back link */}
@@ -79,7 +74,6 @@ export default function RecordPayment() {
 
                 {/* 💰 Payment Form */}
                 <form onSubmit={submit} className="space-y-5 mt-4">
-                    {/* Hidden redirect field */}
                     <input
                         type="hidden"
                         name="redirect"
@@ -99,7 +93,7 @@ export default function RecordPayment() {
                         />
                     </div>
 
-                    {/* Amount Field */}
+                    {/* Amount */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700">
                             Amount to Receive (₵)
@@ -123,7 +117,7 @@ export default function RecordPayment() {
                         </p>
                     </div>
 
-                    {/* Note Field */}
+                    {/* Note */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700">
                             Note (optional)
@@ -142,7 +136,7 @@ export default function RecordPayment() {
                         )}
                     </div>
 
-                    {/* Submit Button */}
+                    {/* Submit */}
                     <div className="flex justify-end pt-3">
                         <button
                             type="submit"

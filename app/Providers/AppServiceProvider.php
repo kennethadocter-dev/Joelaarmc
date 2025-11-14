@@ -2,15 +2,21 @@
 
 namespace App\Providers;
 
-use App\Models\Payment;
-use App\Observers\PaymentObserver;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
+use Illuminate\Contracts\Auth\Authenticatable;
+
 use App\Models\User;
 use App\Models\Setting;
+use App\Models\Loan;
+use App\Models\Payment;
+use App\Models\Customer;
+
+use App\Observers\LoanObserver;
+use App\Observers\PaymentObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -31,7 +37,6 @@ class AppServiceProvider extends ServiceProvider
         |--------------------------------------------------------------------------
         | 🌐 Force HTTPS in Production
         |--------------------------------------------------------------------------
-        | Prevents mixed-content issues when deployed on HTTPS servers like Render.
         */
         if (config('app.env') === 'production') {
             URL::forceScheme('https');
@@ -41,10 +46,11 @@ class AppServiceProvider extends ServiceProvider
         |--------------------------------------------------------------------------
         | 👁️ Model Observers
         |--------------------------------------------------------------------------
-        | Automatically trigger custom logic (like updating loan balances)
-        | when Payments are created, updated, or deleted.
+        | Automatically trigger logic (loan & payment recalculations)
+        | whenever records are created, updated, or deleted.
         */
         Payment::observe(PaymentObserver::class);
+        Loan::observe(LoanObserver::class);
 
         /*
         |--------------------------------------------------------------------------
@@ -55,32 +61,41 @@ class AppServiceProvider extends ServiceProvider
 
         /*
         |--------------------------------------------------------------------------
-        | 🔐 Role-Based Access Gates
+        | 🔐 Role-Based Access Gates (Support for both Users & Customers)
         |--------------------------------------------------------------------------
-        | Define custom access gates for different user roles.
         */
-        Gate::define('access-superadmin', function (User $user) {
-            return $user->is_super_admin || strtolower($user->role) === 'superadmin';
+        Gate::define('access-superadmin', function (Authenticatable $user = null) {
+            return $user instanceof User
+                && ($user->is_super_admin || strtolower($user->role) === 'superadmin');
         });
 
-        Gate::define('access-admin', function (User $user) {
-            return in_array(strtolower($user->role), ['admin', 'staff'])
-                || $user->is_super_admin
-                || strtolower($user->role) === 'superadmin';
+        Gate::define('access-admin', function (Authenticatable $user = null) {
+            return $user instanceof User
+                && (
+                    in_array(strtolower($user->role), ['admin', 'staff'])
+                    || $user->is_super_admin
+                    || strtolower($user->role) === 'superadmin'
+                );
         });
 
-        Gate::define('access-user', function (User $user) {
-            return in_array(strtolower($user->role), ['user', 'customer', 'client'])
-                || $user->is_super_admin
-                || strtolower($user->role) === 'superadmin';
+        Gate::define('access-user', function (Authenticatable $user = null) {
+            if ($user instanceof User) {
+                return in_array(strtolower($user->role), ['user', 'customer', 'client'])
+                    || $user->is_super_admin
+                    || strtolower($user->role) === 'superadmin';
+            }
+
+            if ($user instanceof Customer) {
+                return true; // ✅ allow all customers into their area
+            }
+
+            return false;
         });
 
         /*
         |--------------------------------------------------------------------------
         | 🌍 Global Inertia Shared Data
         |--------------------------------------------------------------------------
-        | Makes key data (user, app settings, flash messages) available globally
-        | to all Inertia pages, so React/Vue components can access them easily.
         */
         Inertia::share([
             // 🧍 Authenticated User Info
@@ -88,10 +103,14 @@ class AppServiceProvider extends ServiceProvider
                 ? [
                     'user' => [
                         'id'             => auth()->id(),
-                        'name'           => auth()->user()->name,
-                        'email'          => auth()->user()->email,
-                        'role'           => strtolower(auth()->user()->role),
-                        'is_super_admin' => auth()->user()->is_super_admin,
+                        'name'           => auth()->user()->name ?? auth()->user()->full_name ?? 'Unknown',
+                        'email'          => auth()->user()->email ?? null,
+                        'role'           => auth()->user() instanceof User
+                            ? strtolower(auth()->user()->role)
+                            : 'customer',
+                        'is_super_admin' => auth()->user() instanceof User
+                            ? (auth()->user()->is_super_admin ?? false)
+                            : false,
                     ],
                 ]
                 : ['user' => null],
