@@ -5,11 +5,15 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
     plugins: [
         laravel({
-            input: ["resources/css/app.css", "resources/js/app.jsx"],
+            input: ["resources/js/app.jsx", "resources/css/app.css"],
             refresh: true,
         }),
         react(),
     ],
+
+    define: {
+        __BACKEND_URL__: JSON.stringify(process.env.APP_URL),
+    },
 
     build: {
         manifest: true,
@@ -26,7 +30,7 @@ export default defineConfig({
     },
 
     server: {
-        host: "127.0.0.1", // ✅ Fixed: localhost binding
+        host: "127.0.0.1",
         port: 5173,
         strictPort: true,
         hmr: {
