@@ -1,6 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, usePage } from "@inertiajs/react";
-import { printSection } from "@/Utils/printSection";
+import { printSection } from "@/Utils/printSection.js";
 import { useRef } from "react";
 
 export default function Show() {
