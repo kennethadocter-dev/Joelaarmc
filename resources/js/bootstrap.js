@@ -2,27 +2,6 @@ import axios from "axios";
 
 window.axios = axios;
 axios.defaults.withCredentials = true;
-
-<<<<<<< HEAD
-window.axios.defaults.withCredentials = true;
-window.axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
-
-// Detect production properly
-const IS_PROD =
-    window.location.hostname !== "localhost" &&
-    window.location.hostname !== "127.0.0.1";
-
-// Correct base URL
-window.axios.defaults.baseURL = IS_PROD
-    ? window.location.origin
-    : "http://127.0.0.1:8000";
-
-// Load CSRF from meta
-const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-if (csrf) {
-    window.axios.defaults.headers.common["X-CSRF-TOKEN"] = csrf;
-}
-=======
 axios.defaults.baseURL = "https://joelaarmc.com";
 
 axios.get("/sanctum/csrf-cookie");
@@ -39,15 +18,14 @@ window.axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 const hostname = window.location.hostname;
 
 const IS_PRODUCTION =
-    hostname === "joelaarmc.com" ||
-    hostname === "www.joelaarmc.com";
+    hostname === "joelaarmc.com" || hostname === "www.joelaarmc.com";
 
 // -------------------------------------------------------
 // FORCE CORRECT BACKEND URL
 // -------------------------------------------------------
 window.axios.defaults.baseURL = IS_PRODUCTION
-    ? "https://joelaarmc.com"   // LIVE SERVER URL
-    : "http://127.0.0.1:8000";  // LOCAL DEV URL
+    ? "https://joelaarmc.com" // LIVE SERVER URL
+    : "http://127.0.0.1:8000"; // LOCAL DEV URL
 
 console.log("AXIOS baseURL:", window.axios.defaults.baseURL);
 
@@ -98,9 +76,7 @@ async function refreshCsrf() {
 
 setInterval(refreshCsrf, 600000); // refresh every 10 mins
 
-document.addEventListener("inertia:navigate", () =>
-    refreshCsrf()
-);
+document.addEventListener("inertia:navigate", () => refreshCsrf());
 
 // -------------------------------------------------------
 // AXIOS INTERCEPTOR: RETRY AFTER 419
@@ -113,6 +89,5 @@ window.axios.interceptors.response.use(
             return window.axios(error.config);
         }
         return Promise.reject(error);
-    }
+    },
 );
->>>>>>> 31dd85b73dfdba697dc86d8bc09635e8523f8446
