@@ -80,17 +80,19 @@ export default function Sidebar() {
                     ? route("superadmin.reports.index")
                     : route("admin.reports.index"),
         },
+
+        // 🔥 FIXED SETTINGS ROUTE HERE
         {
             name: "Settings",
             routeName:
                 role === "superadmin"
                     ? "superadmin.settings.index"
-                    : "admin.settings.index",
+                    : "admin.settings", // ← FIXED (no .index)
             icon: <FaCog />,
             href:
                 role === "superadmin"
                     ? route("superadmin.settings.index")
-                    : route("admin.settings.index"),
+                    : route("admin.settings"), // ← FIXED
         },
     ];
 
@@ -192,6 +194,7 @@ export default function Sidebar() {
                             <span className="text-xl relative z-10">
                                 {item.icon}
                             </span>
+
                             {!collapsed && (
                                 <span className="font-medium relative z-10">
                                     {item.name}
