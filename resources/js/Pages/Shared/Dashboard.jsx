@@ -199,10 +199,10 @@ export default function Dashboard() {
 function SummaryCard({ label, value, link, trendColor, trendSymbol }) {
     const content = (
         <>
-            <h3 className="text-sm font-semibold uppercase tracking-wide">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-white !text-opacity-100">
                 {label}
             </h3>
-            <p className="text-2xl font-bold mt-2 flex items-center gap-2">
+            <p className="text-2xl font-bold mt-2 flex items-center gap-2 text-white !text-opacity-100">
                 {value}
                 {trendSymbol && (
                     <span className={`${trendColor} text-sm font-semibold`}>
@@ -216,12 +216,12 @@ function SummaryCard({ label, value, link, trendColor, trendSymbol }) {
     return link ? (
         <Link
             href={link}
-            className="rounded-xl shadow-md p-6 border border-gray-800 bg-gray-900 hover:shadow-lg transition text-white w-full text-left"
+            className="rounded-xl shadow-md p-6 border border-gray-800 bg-gray-900 hover:shadow-lg transition text-white !text-opacity-100 w-full text-left"
         >
             {content}
         </Link>
     ) : (
-        <div className="rounded-xl shadow-md p-6 border border-gray-800 bg-gray-900 text-white">
+        <div className="rounded-xl shadow-md p-6 border border-gray-800 bg-gray-900 text-white !text-opacity-100">
             {content}
         </div>
     );

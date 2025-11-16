@@ -1,30 +1,72 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
+import { useState } from "react";
 
 export default function Show() {
     const { customer = {}, auth = {}, basePath = "admin" } = usePage().props;
     const c = customer || {};
 
-    // 🔹 Normalize role name
+    // =============================
+    // ROLE LOGIC
+    // =============================
     const userRole = auth?.user?.role?.toLowerCase?.() || "";
-
-    // 🔹 Allow Admin, Staff, and Superadmin to manage (edit/create)
     const canManage =
         ["admin", "staff", "superadmin"].includes(userRole) ||
         auth?.user?.is_super_admin;
 
-    // 🔹 Only Admin & Superadmin can delete
-    const canDelete = ["admin", "superadmin"].includes(userRole);
+    const canDelete = userRole === "admin";
+    const canSuspend = userRole === "admin";
 
-    const handleDelete = () => {
-        if (
-            confirm(
-                "⚠️ Are you sure you want to delete this customer? This action cannot be undone.",
-            )
-        ) {
-            router.delete(route(`${basePath}.customers.destroy`, c.id));
-        }
+    // =============================
+    // DELETE MODAL
+    // =============================
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [confirmName, setConfirmName] = useState("");
+
+    const handleConfirmDelete = () => {
+        router.delete(route(`${basePath}.customers.destroy`, c.id), {
+            preserveScroll: true,
+            preserveState: false,
+            data: { confirm_name: confirmName },
+            onSuccess: () => {
+                setShowDeleteModal(false);
+                setConfirmName("");
+                window.toast?.success?.("Customer permanently deleted.");
+            },
+            onError: () => {
+                window.toast?.error?.("Failed to delete customer.");
+            },
+        });
     };
+
+    // =============================
+    // SUSPEND / REACTIVATE MODAL
+    // =============================
+    const [showSuspendModal, setShowSuspendModal] = useState(false);
+    const [confirmSuspendName, setConfirmSuspendName] = useState("");
+
+    const handleSuspendToggle = () => {
+        router.post(
+            route(`${basePath}.customers.toggleSuspend`, { customer: c.id }),
+            {
+                preserveScroll: true,
+                preserveState: false,
+                data: { confirm_name: confirmSuspendName },
+                onSuccess: () => {
+                    setShowSuspendModal(false);
+                    setConfirmSuspendName("");
+                    window.toast?.success?.("Customer status updated.");
+                },
+                onError: () => {
+                    window.toast?.error?.("Failed to update customer status.");
+                },
+            },
+        );
+    };
+
+    const hasActiveLoans = (c?.loans || []).some(
+        (loan) => loan.status === "active" || loan.status === "overdue",
+    );
 
     return (
         <AuthenticatedLayout
@@ -38,15 +80,17 @@ export default function Show() {
 
             <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 <div className="bg-white shadow-lg rounded-lg p-6 space-y-6">
-                    {/* 🧾 Header */}
+                    {/* =============================
+                        HEADER + ACTION BUTTONS
+                    ============================= */}
                     <div className="flex justify-between items-center border-b pb-3">
                         <h1 className="text-2xl font-bold text-gray-800">
                             {c.full_name || "—"}
                         </h1>
 
                         {canManage && c.id && (
-                            <div className="flex gap-3">
-                                {/* ✏️ Edit Customer */}
+                            <div className="flex flex-wrap gap-3">
+                                {/* EDIT */}
                                 <Link
                                     href={route(
                                         `${basePath}.customers.edit`,
@@ -57,24 +101,31 @@ export default function Show() {
                                     ✏️ Edit
                                 </Link>
 
-                                {/* 💰 Create Loan */}
+                                {/* CREATE LOAN */}
                                 <Link
-                                    href={route(`${basePath}.loans.create`, {
-                                        customer_id: c.id,
-                                        client_name: c.full_name,
-                                        amount_requested:
-                                            c.loan_amount_requested,
-                                    })}
+                                    href={
+                                        c.status === "suspended"
+                                            ? "#"
+                                            : route(
+                                                  `${basePath}.loans.create`,
+                                                  {
+                                                      customer_id: c.id,
+                                                      client_name: c.full_name,
+                                                      amount_requested:
+                                                          c.loan_amount_requested,
+                                                  },
+                                              )
+                                    }
                                     className={`px-4 py-2 rounded font-medium transition ${
-                                        c.loans?.length >= 3
+                                        c.status === "suspended"
                                             ? "bg-gray-400 cursor-not-allowed text-white"
                                             : "bg-green-600 hover:bg-green-700 text-white"
                                     }`}
                                     onClick={(e) => {
-                                        if (c.loans?.length >= 3) {
+                                        if (c.status === "suspended") {
                                             e.preventDefault();
                                             alert(
-                                                "⚠️ This customer already has 3 active or pending loans.",
+                                                "⚠️ Suspended customers cannot take loans.",
                                             );
                                         }
                                     }}
@@ -82,10 +133,28 @@ export default function Show() {
                                     💰 Create Loan
                                 </Link>
 
-                                {/* 🗑️ Delete Customer (Only Admin & Superadmin) */}
+                                {/* SUSPEND / REACTIVATE */}
+                                {canSuspend && (
+                                    <button
+                                        onClick={() =>
+                                            setShowSuspendModal(true)
+                                        }
+                                        className={`px-4 py-2 rounded font-medium text-white transition ${
+                                            c.status === "suspended"
+                                                ? "bg-yellow-600 hover:bg-yellow-700"
+                                                : "bg-orange-600 hover:bg-orange-700"
+                                        }`}
+                                    >
+                                        {c.status === "suspended"
+                                            ? "Reactivate"
+                                            : "Suspend"}
+                                    </button>
+                                )}
+
+                                {/* DELETE */}
                                 {canDelete && (
                                     <button
-                                        onClick={handleDelete}
+                                        onClick={() => setShowDeleteModal(true)}
                                         className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition font-medium"
                                     >
                                         🗑️ Delete
@@ -95,7 +164,9 @@ export default function Show() {
                         )}
                     </div>
 
-                    {/* 🟩 Status */}
+                    {/* =============================
+                        STATUS BADGE
+                    ============================= */}
                     <div className="flex items-center gap-2 mt-2">
                         <span
                             className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -108,6 +179,7 @@ export default function Show() {
                         >
                             {(c.status || "unknown").toUpperCase()}
                         </span>
+
                         <span className="text-gray-500 text-sm">
                             Joined{" "}
                             {c.created_at
@@ -116,7 +188,9 @@ export default function Show() {
                         </span>
                     </div>
 
-                    {/* 👤 Personal Info */}
+                    {/* =============================
+                        PERSONAL INFORMATION
+                    ============================= */}
                     <Section title="Personal Information">
                         <TwoColumn>
                             <Info label="Full Name" value={c.full_name} />
@@ -136,7 +210,9 @@ export default function Show() {
                                 label="Marital Status"
                                 value={
                                     c.marital_status
-                                        ? c.marital_status[0].toUpperCase() +
+                                        ? c.marital_status
+                                              .charAt(0)
+                                              .toUpperCase() +
                                           c.marital_status.slice(1)
                                         : "—"
                                 }
@@ -144,7 +220,9 @@ export default function Show() {
                         </TwoColumn>
                     </Section>
 
-                    {/* 🏠 Address */}
+                    {/* =============================
+                        ADDRESS INFORMATION
+                    ============================= */}
                     <Section title="Address Information">
                         <TwoColumn>
                             <Info label="House No." value={c.house_no} />
@@ -158,7 +236,9 @@ export default function Show() {
                         </TwoColumn>
                     </Section>
 
-                    {/* 💼 Work & Financial */}
+                    {/* =============================
+                        WORK & FINANCIAL INFO
+                    ============================= */}
                     <Section title="Work & Financial Information">
                         <TwoColumn>
                             <Info label="Workplace" value={c.workplace} />
@@ -181,7 +261,9 @@ export default function Show() {
                         </TwoColumn>
                     </Section>
 
-                    {/* 💰 Loan Request */}
+                    {/* =============================
+                        REQUESTED LOAN INFO
+                    ============================= */}
                     <Section title="Loan Request Information">
                         <TwoColumn>
                             <Info
@@ -192,34 +274,34 @@ export default function Show() {
                         </TwoColumn>
                     </Section>
 
-                    {/* 🧍‍♂️ Guarantors */}
+                    {/* =============================
+                        GUARANTORS
+                    ============================= */}
                     <Section title="Guarantors">
-                        {c.guarantors?.length > 0 ? (
-                            <div className="overflow-x-auto rounded-md border border-gray-200">
-                                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        {c.guarantors?.length ? (
+                            <div className="overflow-x-auto rounded border">
+                                <table className="min-w-full text-sm divide-y divide-gray-200">
                                     <thead className="bg-gray-100">
                                         <tr>
-                                            {["Name", "Contact"].map((col) => (
-                                                <th
-                                                    key={col}
-                                                    className="px-4 py-2 text-left font-semibold text-gray-800"
-                                                >
-                                                    {col}
-                                                </th>
-                                            ))}
+                                            <th className="px-4 py-2 text-left">
+                                                Name
+                                            </th>
+                                            <th className="px-4 py-2 text-left">
+                                                Contact
+                                            </th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-200">
+                                    <tbody>
                                         {c.guarantors.map((g) => (
                                             <tr
                                                 key={g.id}
-                                                className="hover:bg-gray-50 transition"
+                                                className="hover:bg-gray-50"
                                             >
-                                                <td className="px-4 py-2 text-gray-800">
-                                                    {g.name || "—"}
+                                                <td className="px-4 py-2">
+                                                    {g.name}
                                                 </td>
-                                                <td className="px-4 py-2 text-gray-600">
-                                                    {g.contact || "—"}
+                                                <td className="px-4 py-2">
+                                                    {g.contact}
                                                 </td>
                                             </tr>
                                         ))}
@@ -227,65 +309,53 @@ export default function Show() {
                                 </table>
                             </div>
                         ) : (
-                            <p className="text-gray-600 italic">
+                            <p className="text-gray-500 italic">
                                 No guarantors listed.
                             </p>
                         )}
                     </Section>
 
-                    {/* 💸 Loan History */}
+                    {/* =============================
+                        LOAN HISTORY
+                    ============================= */}
                     <Section title="Loan History">
-                        {c.loans?.length > 0 ? (
-                            <div className="overflow-x-auto rounded-md border border-gray-200">
-                                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        {c.loans?.length ? (
+                            <div className="overflow-x-auto rounded border">
+                                <table className="min-w-full text-sm divide-y divide-gray-200">
                                     <thead className="bg-gray-100">
                                         <tr>
-                                            {[
-                                                "Code",
-                                                "Amount (₵)",
-                                                "Status",
-                                                "Balance (₵)",
-                                                "Created",
-                                            ].map((col) => (
-                                                <th
-                                                    key={col}
-                                                    className="px-4 py-2 text-left font-semibold text-gray-800"
-                                                >
-                                                    {col}
-                                                </th>
-                                            ))}
+                                            <th className="px-4 py-2">Code</th>
+                                            <th className="px-4 py-2">
+                                                Amount
+                                            </th>
+                                            <th className="px-4 py-2">
+                                                Status
+                                            </th>
+                                            <th className="px-4 py-2">
+                                                Balance
+                                            </th>
+                                            <th className="px-4 py-2">
+                                                Created
+                                            </th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-200">
+                                    <tbody>
                                         {c.loans.map((loan) => (
                                             <tr
                                                 key={loan.id}
-                                                className="hover:bg-gray-50 transition"
+                                                className="hover:bg-gray-50"
                                             >
                                                 <td className="px-4 py-2">
                                                     {loan.code || `#${loan.id}`}
                                                 </td>
                                                 <td className="px-4 py-2">
-                                                    {loan.amount || "—"}
+                                                    {loan.amount}
                                                 </td>
                                                 <td className="px-4 py-2 capitalize">
-                                                    <span
-                                                        className={`px-2 py-1 rounded-full text-xs font-semibold border ${
-                                                            loan.status ===
-                                                            "paid"
-                                                                ? "bg-green-100 text-green-700 border-green-400"
-                                                                : loan.status ===
-                                                                    "overdue"
-                                                                  ? "bg-red-100 text-red-700 border-red-400"
-                                                                  : "bg-yellow-100 text-yellow-700 border-yellow-400"
-                                                        }`}
-                                                    >
-                                                        {loan.status}
-                                                    </span>
+                                                    {loan.status}
                                                 </td>
                                                 <td className="px-4 py-2">
-                                                    {loan.amount_remaining ??
-                                                        "—"}
+                                                    {loan.amount_remaining}
                                                 </td>
                                                 <td className="px-4 py-2">
                                                     {new Date(
@@ -298,28 +368,138 @@ export default function Show() {
                                 </table>
                             </div>
                         ) : (
-                            <p className="text-gray-600 italic">
-                                No loans found for this customer.
+                            <p className="text-gray-500 italic">
+                                No loans for this customer.
                             </p>
                         )}
                     </Section>
-
-                    {/* 🔙 Footer */}
-                    <div className="flex justify-between items-center pt-4 border-t">
-                        <Link
-                            href={route(`${basePath}.customers.index`)}
-                            className="text-gray-600 hover:underline"
-                        >
-                            ← Back to Customers
-                        </Link>
-                    </div>
                 </div>
             </div>
+
+            {/* =============================
+                DELETE MODAL
+            ============================= */}
+            {showDeleteModal && canDelete && (
+                <div className="fixed inset-0 bg-black/50 flex justify-center items-start z-[99999]">
+                    <div className="mt-24 bg-white rounded-lg p-6 shadow-xl w-full max-w-md">
+                        <h2 className="text-lg font-bold text-red-600 mb-3">
+                            Permanently Delete Customer
+                        </h2>
+
+                        <p className="text-gray-700 mb-3">
+                            This action cannot be undone. Type the customer’s
+                            full name:
+                        </p>
+
+                        <p className="font-semibold mb-1">{c.full_name}</p>
+
+                        <input
+                            type="text"
+                            value={confirmName}
+                            onChange={(e) => setConfirmName(e.target.value)}
+                            placeholder="Type customer's name"
+                            className="w-full mb-4 px-3 py-2 border rounded bg-gray-50"
+                        />
+
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowDeleteModal(false)}
+                                className="px-4 py-2 bg-gray-300 rounded"
+                            >
+                                Cancel
+                            </button>
+
+                            <button
+                                onClick={handleConfirmDelete}
+                                disabled={
+                                    confirmName.trim().toLowerCase() !==
+                                    c.full_name.trim().toLowerCase()
+                                }
+                                className={`px-4 py-2 rounded text-white ${
+                                    confirmName.trim().toLowerCase() ===
+                                    c.full_name.trim().toLowerCase()
+                                        ? "bg-red-600 hover:bg-red-700"
+                                        : "bg-red-400 cursor-not-allowed"
+                                }`}
+                            >
+                                Delete Permanently
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* =============================
+                SUSPEND / REACTIVATE MODAL
+            ============================= */}
+            {showSuspendModal && canSuspend && (
+                <div className="fixed inset-0 bg-black/50 flex justify-center items-start z-[99999]">
+                    <div className="mt-24 bg-white rounded-lg p-6 shadow-xl w-full max-w-md">
+                        <h2 className="text-lg font-bold text-orange-600 mb-3">
+                            {c.status === "suspended"
+                                ? "Reactivate Customer"
+                                : "Suspend Customer"}
+                        </h2>
+
+                        {hasActiveLoans && c.status !== "suspended" && (
+                            <p className="text-red-600 font-semibold mb-2">
+                                ⚠️ Customer has active/overdue loans. Suspending
+                                may interrupt repayments.
+                            </p>
+                        )}
+
+                        <p className="text-gray-700 mb-2">
+                            Type this customer's full name to confirm:
+                        </p>
+
+                        <p className="font-semibold mb-2">{c.full_name}</p>
+
+                        <input
+                            type="text"
+                            value={confirmSuspendName}
+                            onChange={(e) =>
+                                setConfirmSuspendName(e.target.value)
+                            }
+                            placeholder="Type customer's name"
+                            className="w-full mb-4 px-3 py-2 border rounded bg-gray-50"
+                        />
+
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowSuspendModal(false)}
+                                className="px-4 py-2 bg-gray-300 rounded"
+                            >
+                                Cancel
+                            </button>
+
+                            <button
+                                onClick={handleSuspendToggle}
+                                disabled={
+                                    confirmSuspendName.trim().toLowerCase() !==
+                                    c.full_name.trim().toLowerCase()
+                                }
+                                className={`px-4 py-2 rounded text-white ${
+                                    confirmSuspendName.trim().toLowerCase() ===
+                                    c.full_name.trim().toLowerCase()
+                                        ? c.status === "suspended"
+                                            ? "bg-yellow-600 hover:bg-yellow-700"
+                                            : "bg-orange-600 hover:bg-orange-700"
+                                        : "bg-gray-400 cursor-not-allowed"
+                                }`}
+                            >
+                                {c.status === "suspended"
+                                    ? "Reactivate"
+                                    : "Suspend"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </AuthenticatedLayout>
     );
 }
 
-/* 🔹 Helpers */
+/* Helper Components */
 function Section({ title, children }) {
     return (
         <section className="mt-4">

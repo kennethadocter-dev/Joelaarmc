@@ -8,47 +8,69 @@ use App\Models\Customer;
 use App\Models\Guarantor;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Inertia\Inertia;
-use App\Helpers\SmsNotifier;
-use App\Mail\WelcomeCustomerMail;
-use App\Jobs\SendCustomerWelcomeAndLogin;
 
 class CustomerController extends Controller
 {
     /**
-     * 🧭 Display all customers
+     * 🧭 Display all customers (with search + status filter)
      */
     public function index(Request $request)
     {
         $search = $request->input('search', '');
+        $status = $request->input('status', 'active'); // default = active
+
+        // Normalise / guard status
+        if (!in_array($status, ['active', 'inactive', 'suspended', 'all'])) {
+            $status = 'active';
+        }
 
         $query = Customer::with('loans')
+            // Status filter
+            ->when($status !== 'all', function ($q) use ($status) {
+                $q->where('status', $status);
+            })
+            // Search filter
             ->when($search, function ($q) use ($search) {
-                $q->where('full_name', 'like', "%{$search}%")
-                    ->orWhere('phone', 'like', "%{$search}%")
-                    ->orWhere('community', 'like', "%{$search}%");
+                $q->where(function ($inner) use ($search) {
+                    $inner->where('full_name', 'like', "%{$search}%")
+                        ->orWhere('phone', 'like', "%{$search}%")
+                        ->orWhere('community', 'like', "%{$search}%");
+                });
             })
             ->orderByDesc('created_at');
 
         $customers = $query->paginate(10)->withQueryString();
 
+        // Global counts (for cards)
+        $activeCount = Customer::where('status', 'active')->count();
+        $inactiveCount = Customer::where('status', 'inactive')->count();
+        $suspendedCount = Customer::where('status', 'suspended')->count();
+
         return Inertia::render('Admin/Customers/Index', [
             'auth' => ['user' => $request->user()],
             'customers' => $customers->items(),
             'pagination' => $customers->toArray(),
+
             'counts' => [
-                'total' => Customer::count(),
-                'with_loans' => Customer::has('loans')->count(),
-                'without_loans' => Customer::doesntHave('loans')->count(),
+                // All = active + inactive + suspended
+                'total'     => $activeCount + $inactiveCount + $suspendedCount,
+                'active'    => $activeCount,
+                'inactive'  => $inactiveCount,
+                'suspended' => $suspendedCount,
             ],
-            'filters' => ['search' => $search],
+
+            'filters' => [
+                'search' => $search,
+                'status' => $status,
+            ],
+
             'basePath' => 'admin',
         ]);
     }
 
     /**
-     * ➕ Show customer creation form
+     * ➕ Create customer form
      */
     public function create()
     {
@@ -65,95 +87,46 @@ class CustomerController extends Controller
     {
         $validated = $this->validateCustomer($request);
 
-        // ✅ Normalize gender
+        // Normalize gender
         if (!empty($validated['gender'])) {
-            $gender = strtolower(trim($validated['gender']));
-            $validated['gender'] = in_array($gender, ['male', 'm']) ? 'M' :
-                                   (in_array($gender, ['female', 'f']) ? 'F' : null);
+            $g = strtolower(trim($validated['gender']));
+            $validated['gender'] = in_array($g, ['male', 'm']) ? 'M' :
+                                   (in_array($g, ['female', 'f']) ? 'F' : null);
         }
 
         DB::beginTransaction();
         try {
-            // 1️⃣ Create Customer
             $customer = Customer::create($validated);
 
-            // 2️⃣ Create Guarantors (optional)
-            $guarantors = $request->input('guarantors', []);
-            if (is_array($guarantors) && count($guarantors) > 0) {
-                foreach ($guarantors as $g) {
-                    if (!empty($g['name'])) {
-                        Guarantor::create([
-                            'customer_id' => $customer->id,
-                            'name' => $g['name'] ?? '',
-                            'occupation' => $g['occupation'] ?? '',
-                            'residence' => $g['residence'] ?? '',
-                            'contact' => $g['contact'] ?? '',
-                        ]);
-                    }
-                }
-            }
-
-            // 3️⃣ Notifications
-            try {
-                // 🔸 If customer has email — send login + welcome mails via queued job
-                if (!empty($customer->email)) {
-                    // Generate a simple random password for login credentials
-                    $plainPassword = substr(str_shuffle('ABCDEFGHJKLMNPQRSTUVWXYZ23456789'), 0, 8);
-
-                    // Dispatch background job to send all notifications
-                    dispatch(new SendCustomerWelcomeAndLogin(
-                        $customer,
-                        $customer->email,
-                        $plainPassword
-                    ));
-
-                    Log::info('📨 Customer welcome & login job dispatched', [
+            // Save guarantors
+            foreach ($request->guarantors ?? [] as $g) {
+                if (!empty($g['name'])) {
+                    Guarantor::create([
                         'customer_id' => $customer->id,
-                        'email' => $customer->email,
+                        'name' => $g['name'],
+                        'occupation' => $g['occupation'] ?? '',
+                        'residence' => $g['residence'] ?? '',
+                        'contact' => $g['contact'] ?? '',
                     ]);
-                } else {
-                    // 📱 No email provided — send SMS only
-                    if (!empty($customer->phone)) {
-                        $msg = "Hi {$customer->full_name}, welcome to Joelaar Micro-Credit! Your record has been created successfully.";
-                        SmsNotifier::send($customer->phone, $msg);
-                    }
                 }
-            } catch (\Throwable $notifyEx) {
-                Log::warning('⚠️ Customer notification failed', [
-                    'customer_id' => $customer->id,
-                    'error' => $notifyEx->getMessage(),
-                ]);
             }
 
             DB::commit();
 
-            // 4️⃣ Redirect to Loan Creation
             return redirect()->route('admin.loans.create', [
                 'customer_id' => $customer->id,
                 'client_name' => $customer->full_name,
-                'amount_requested' => $customer->loan_amount_requested,
-            ])->with([
-                'success' => 'Customer added successfully! Redirecting to loan creation...',
-                'customer' => $customer,
-            ]);
+            ])->with('success', 'Customer created successfully.');
+
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('❌ Customer creation failed', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString(),
-                'input' => $request->all(),
-            ]);
-            if (config('app.debug')) {
-                return back()->with('error', 'Error: ' . $e->getMessage());
-            }
-            return back()->with('error', 'Failed to create customer. Please try again.');
+            Log::error('Customer creation failed', ['error' => $e->getMessage()]);
+            return back()->with('error', 'Failed to create customer.');
         }
     }
 
     /**
-     * 👁️ View single customer
+     * 👁️ Show customer
      */
     public function show(Customer $customer, Request $request)
     {
@@ -167,7 +140,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * ✏️ Edit customer form
+     * ✏️ Edit customer
      */
     public function edit(Customer $customer)
     {
@@ -181,84 +154,132 @@ class CustomerController extends Controller
     }
 
     /**
-     * 🔄 Update customer info
+     * 🔄 Update customer
      */
     public function update(Request $request, Customer $customer)
     {
         $validated = $this->validateCustomer($request, $customer->id);
 
-        // ✅ Normalize gender before update
         if (!empty($validated['gender'])) {
-            $gender = strtolower(trim($validated['gender']));
-            $validated['gender'] = in_array($gender, ['male', 'm']) ? 'M' :
-                                   (in_array($gender, ['female', 'f']) ? 'F' : null);
+            $g = strtolower(trim($validated['gender']));
+            $validated['gender'] = in_array($g, ['male', 'm']) ? 'M' :
+                                   (in_array($g, ['female', 'f']) ? 'F' : null);
         }
 
         DB::beginTransaction();
         try {
             $customer->update($validated);
 
-            // 🔁 Update Guarantors (optional)
+            // Update guarantors
             $customer->guarantors()->delete();
-            $guarantors = $request->input('guarantors', []);
-            if (is_array($guarantors) && count($guarantors) > 0) {
-                foreach ($guarantors as $g) {
-                    if (!empty($g['name'])) {
-                        Guarantor::create([
-                            'customer_id' => $customer->id,
-                            'name' => $g['name'] ?? '',
-                            'occupation' => $g['occupation'] ?? '',
-                            'residence' => $g['residence'] ?? '',
-                            'contact' => $g['contact'] ?? '',
-                        ]);
-                    }
+            foreach ($request->guarantors ?? [] as $g) {
+                if (!empty($g['name'])) {
+                    Guarantor::create([
+                        'customer_id' => $customer->id,
+                        'name' => $g['name'],
+                        'occupation' => $g['occupation'] ?? '',
+                        'residence' => $g['residence'] ?? '',
+                        'contact' => $g['contact'] ?? '',
+                    ]);
                 }
             }
 
             DB::commit();
             return redirect()->route('admin.customers.edit', $customer->id)
                 ->with('success', 'Customer updated successfully.');
+
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('❌ Error updating customer', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-            ]);
-            if (config('app.debug')) {
-                return back()->with('error', 'Error: ' . $e->getMessage());
-            }
+            Log::error('Customer update failed', ['error' => $e->getMessage()]);
             return back()->with('error', 'Failed to update customer.');
         }
     }
 
-    /**
-     * ❌ Delete customer (restricted to Admin + Superadmin)
-     */
-    public function destroy(Customer $customer)
+    /* ============================================================
+       🟡 SUSPEND / REACTIVATE CUSTOMER (with name confirmation)
+       ============================================================ */
+    public function toggleSuspend(Request $request, Customer $customer)
     {
         $user = auth()->user();
 
-        // 🚫 Restrict Staff from deleting
-        if ($user->role === 'staff') {
+        // Only admin can suspend / reactivate
+        if ($user->role !== 'admin') {
+            return back()->with('error', 'Only admin can change customer status.');
+        }
+
+        // Confirm name typed in modal
+        $request->validate([
+            'confirm_name' => 'required|string|max:255',
+        ]);
+
+        if (
+            trim(strtolower($request->confirm_name)) !==
+            trim(strtolower($customer->full_name))
+        ) {
+            return back()->with('error', 'Name does not match. Status was NOT changed.');
+        }
+
+        // Toggle status
+        $newStatus = $customer->status === 'suspended'
+            ? 'active'
+            : 'suspended';
+
+        $customer->status = $newStatus;
+        $customer->save();
+
+        return back()->with(
+            'success',
+            $newStatus === 'suspended'
+                ? 'Customer has been suspended.'
+                : 'Customer has been reactivated.'
+        );
+    }
+
+    /**
+     * ❌ PERMANENT DELETE CUSTOMER — Requires name confirmation
+     */
+    public function destroy(Request $request, Customer $customer)
+    {
+        $user = auth()->user();
+
+        if (!in_array($user->role, ['admin', 'superadmin'])) {
             return back()->with('error', 'You do not have permission to delete customers.');
         }
 
+        // Validate typed name
+        $request->validate([
+            'confirm_name' => 'required|string|max:255',
+        ]);
+
+        // Compare entered name with full_name
+        if (
+            trim(strtolower($request->confirm_name)) !==
+            trim(strtolower($customer->full_name))
+        ) {
+            return back()->with('error', 'Name does not match. Customer was NOT deleted.');
+        }
+
+        DB::beginTransaction();
         try {
-            $customer->guarantors()->delete();
-            $customer->delete();
+            // Permanently delete using your model helper
+            $success = $customer->forceDeleteFully();
+
+            if (!$success) {
+                throw new \Exception("Force delete failed");
+            }
+
+            DB::commit();
 
             return redirect()->route('admin.customers.index')
-                ->with('success', 'Customer deleted successfully.');
+                ->with('success', 'Customer permanently deleted.');
+
         } catch (\Throwable $e) {
-            Log::error('❌ Error deleting customer', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
+            DB::rollBack();
+            Log::error('Delete failed', [
+                'customer_id' => $customer->id,
+                'error' => $e->getMessage()
             ]);
-            if (config('app.debug')) {
-                return back()->with('error', 'Error: ' . $e->getMessage());
-            }
+
             return back()->with('error', 'Failed to delete customer.');
         }
     }
@@ -296,9 +317,6 @@ class CustomerController extends Controller
             'guarantors.*.occupation' => 'nullable|string|max:255',
             'guarantors.*.residence' => 'nullable|string|max:255',
             'guarantors.*.contact' => 'nullable|string|max:255',
-        ], [
-            'email.unique' => 'This email address is already in use.',
-            'phone.unique' => 'This phone number is already registered.',
         ]);
     }
 }

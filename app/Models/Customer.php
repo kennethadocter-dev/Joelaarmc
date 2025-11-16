@@ -2,22 +2,17 @@
 
 namespace App\Models;
 
-use Illuminate\Foundation\Auth\User as Authenticatable; // ✅ Must extend this, not Model
+use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
-use Carbon\Carbon;
 
 class Customer extends Authenticatable
 {
-    use HasFactory, SoftDeletes, Notifiable;
-
-    protected $dates = ['deleted_at'];
+    use HasFactory, Notifiable;
 
     protected $fillable = [
-        // 🧍‍♀️ Personal Info
         'full_name',
         'email',
         'phone',
@@ -26,7 +21,7 @@ class Customer extends Authenticatable
         'date_of_birth',
         'id_number',
 
-        // 🏠 Address Info
+        // Address
         'house_no',
         'address',
         'community',
@@ -34,7 +29,7 @@ class Customer extends Authenticatable
         'district',
         'postal_address',
 
-        // 💼 Work & Financial Info
+        // Work
         'workplace',
         'profession',
         'employer',
@@ -44,12 +39,12 @@ class Customer extends Authenticatable
         'bank_monthly_deduction',
         'take_home',
 
-        // 💰 Loan Info
+        // Loan Info
         'loan_amount_requested',
         'loan_purpose',
         'notes',
 
-        // 📊 Summary Fields
+        // Summary
         'total_loans',
         'total_paid',
         'total_remaining',
@@ -57,7 +52,6 @@ class Customer extends Authenticatable
         'last_loan_date',
         'status',
 
-        // 🔐 Password for authentication
         'password',
     ];
 
@@ -67,11 +61,7 @@ class Customer extends Authenticatable
         'email_verified_at' => 'datetime',
     ];
 
-    /*
-    |--------------------------------------------------------------------------
-    | 🔒 AUTOMATIC PASSWORD HASHING
-    |--------------------------------------------------------------------------
-    */
+    /* Auto-hash password */
     public function setPasswordAttribute($value)
     {
         if (!empty($value) && !str_starts_with($value, '$2y$')) {
@@ -81,11 +71,7 @@ class Customer extends Authenticatable
         }
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 🔗 RELATIONSHIPS
-    |--------------------------------------------------------------------------
-    */
+    /* Relationships */
     public function loans()
     {
         return $this->hasMany(Loan::class);
@@ -101,16 +87,7 @@ class Customer extends Authenticatable
         return $this->hasMany(\App\Models\Guarantor::class);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 🧮 HELPERS & CALCULATIONS
-    |--------------------------------------------------------------------------
-    */
-    public function getDisplayNameAttribute()
-    {
-        return $this->full_name ?? $this->email ?? $this->phone ?? 'Unnamed Customer';
-    }
-
+    /* Summary Helpers */
     public function calculateTotalLoans(): float
     {
         return round($this->loans()->sum('amount'), 2);
@@ -140,11 +117,7 @@ class Customer extends Authenticatable
             ->value('created_at');
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 🔁 REBUILD CUSTOMER LOAN SUMMARY
-    |--------------------------------------------------------------------------
-    */
+    /* Refresh Loan Summary */
     public static function refreshLoanSummary(Customer $customer): void
     {
         try {
@@ -155,76 +128,40 @@ class Customer extends Authenticatable
             $customer->last_loan_date = $customer->calculateLastLoanDate();
             $customer->saveQuietly();
 
-            Log::info('👤 Customer totals recalculated', [
-                'customer_id' => $customer->id,
-                'name' => $customer->display_name,
-            ]);
         } catch (\Throwable $e) {
-            Log::error('❌ Failed to refresh customer loan summary', [
-                'customer_id' => $customer->id ?? null,
+            Log::error('Failed to refresh customer summary', [
+                'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
-                'line' => $e->getLine(),
             ]);
         }
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | ⚙️ MODEL EVENTS
-    |--------------------------------------------------------------------------
-    */
-    protected static function booted()
+    /* ============================
+       🔥 PERMANENT DELETE METHOD
+       ============================ */
+    public function forceDeleteFully()
     {
-        static::saved(function (Customer $customer) {
-            self::refreshLoanSummary($customer);
-        });
+        try {
+            // Delete guarantors
+            $this->guarantors()->delete();
 
-        static::deleting(function (Customer $customer) {
-            foreach ($customer->loans as $loan) {
+            // Delete payments (via loans)
+            foreach ($this->loans as $loan) {
+                $loan->payments()->delete();
                 $loan->delete();
             }
-        });
 
-        static::deleted(function (Customer $customer) {
-            Log::info('🗑️ Customer soft-deleted', [
-                'customer_id' => $customer->id,
-                'name' => $customer->display_name,
-                'deleted_at' => $customer->deleted_at,
+            // Delete the customer permanently
+            parent::delete();
+
+            return true;
+
+        } catch (\Throwable $e) {
+            Log::error('Force delete failed', [
+                'customer_id' => $this->id,
+                'error' => $e->getMessage(),
             ]);
-        });
-
-        static::restoring(function (Customer $customer) {
-            if ($customer->deleted_at && $customer->deleted_at->lt(Carbon::now()->subDays(30))) {
-                Log::warning('⚠️ Attempted restore of expired customer prevented', [
-                    'customer_id' => $customer->id,
-                    'deleted_at' => $customer->deleted_at,
-                ]);
-                throw new \Exception("This customer record is too old to restore (deleted over 30 days ago).");
-            }
-        });
-
-        static::registerLoanHooks();
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | 🧠 LISTEN TO RELATED LOAN CHANGES
-    |--------------------------------------------------------------------------
-    */
-    protected static function registerLoanHooks(): void
-    {
-        Loan::created(fn(Loan $loan) => $loan->customer && self::refreshLoanSummary($loan->customer));
-        Loan::updated(fn(Loan $loan) => $loan->customer && self::refreshLoanSummary($loan->customer));
-        Loan::deleted(fn(Loan $loan) => $loan->customer && self::refreshLoanSummary($loan->customer));
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | 🧹 AUTO-PURGE SCOPE (for scheduled command reference)
-    |--------------------------------------------------------------------------
-    */
-    public function scopeOlderThan30Days($query)
-    {
-        return $query->onlyTrashed()->where('deleted_at', '<=', Carbon::now()->subDays(30));
+            return false;
+        }
     }
 }

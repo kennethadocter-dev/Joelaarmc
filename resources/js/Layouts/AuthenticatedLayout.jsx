@@ -3,47 +3,13 @@ import { Link, usePage, router } from "@inertiajs/react";
 import { FaUserCircle, FaChevronDown } from "react-icons/fa";
 import Sidebar from "../Components/Sidebar.jsx";
 
+/**
+ * Dummy useConfirm export so other files that still import it don't crash.
+ * (Currently not used for the delete confirmation anymore.)
+ */
 export function useConfirm() {
-    const [state, setState] = useState({
-        open: false,
-        message: "",
-        onConfirm: null,
-    });
-
-    const confirm = (message, onConfirm) => {
-        setState({ open: true, message, onConfirm });
-    };
-
-    const ConfirmDialog = () =>
-        state.open ? (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[99999]">
-                <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-xl w-80">
-                    <p className="text-gray-900 dark:text-gray-100 mb-4 whitespace-pre-line">
-                        {state.message}
-                    </p>
-
-                    <div className="flex gap-4 justify-end">
-                        <button
-                            onClick={() => setState({ ...state, open: false })}
-                            className="px-4 py-2 bg-gray-300 dark:bg-gray-700 rounded"
-                        >
-                            Cancel
-                        </button>
-
-                        <button
-                            onClick={() => {
-                                state.onConfirm?.();
-                                setState({ ...state, open: false });
-                            }}
-                            className="px-4 py-2 bg-red-600 text-white rounded"
-                        >
-                            Confirm
-                        </button>
-                    </div>
-                </div>
-            </div>
-        ) : null;
-
+    const confirm = () => {};
+    const ConfirmDialog = () => null;
     return { confirm, ConfirmDialog };
 }
 
@@ -56,8 +22,6 @@ export default function AuthenticatedLayout({ header, children }) {
 
     const [open, setOpen] = useState(false);
     const dropdownRef = useRef(null);
-
-    const { ConfirmDialog } = useConfirm();
 
     const handleLogout = (e) => {
         e.preventDefault();
@@ -80,14 +44,14 @@ export default function AuthenticatedLayout({ header, children }) {
 
     return (
         <div className="min-h-screen flex bg-gray-100 dark:bg-gray-900">
-            {/* ===== SIDEBAR (STABLE WIDTH) ===== */}
+            {/* Sidebar */}
             <div className="flex-shrink-0 z-[100]">
                 <Sidebar />
             </div>
 
-            {/* ===== MAIN CONTENT ===== */}
+            {/* Main content */}
             <div className="flex-1 flex flex-col">
-                {/* TOP NAV */}
+                {/* Top Nav */}
                 <header className="bg-white dark:bg-gray-800 shadow relative z-[9999]">
                     <div className="w-full py-4 px-6 flex justify-between items-center">
                         {header}
@@ -134,9 +98,9 @@ export default function AuthenticatedLayout({ header, children }) {
                     </div>
                 </header>
 
-                {/* PAGE CONTENT */}
+                {/* Page Content */}
                 <main className="p-6 flex-1">
-                    {/* BACK BUTTON — shown on all pages except Dashboard */}
+                    {/* Back button except on dashboards */}
                     {!route().current("admin.dashboard") &&
                         !route().current("superadmin.dashboard") && (
                             <button
@@ -152,9 +116,6 @@ export default function AuthenticatedLayout({ header, children }) {
 
                     {children}
                 </main>
-
-                {/* GLOBAL CONFIRMATION DIALOG */}
-                <ConfirmDialog />
             </div>
         </div>
     );

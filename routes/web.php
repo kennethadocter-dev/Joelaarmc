@@ -74,7 +74,7 @@ Route::prefix('superadmin')
         Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])
             ->name('dashboard.expectedInterest');
 
-        // SETTINGS (NEW — FIXES YOUR ISSUE)
+        // SETTINGS
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings/update', [AdminSettingsController::class, 'update'])->name('settings.update');
         Route::put('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
@@ -118,17 +118,34 @@ Route::prefix('admin')
         Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('dashboard.loansByYear');
         Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])->name('dashboard.expectedInterest');
 
-        // MODULES
+        // ============================
+        // CUSTOMERS
+        // ============================
         Route::resource('customers', AdminCustomerController::class);
+
+        // 🔥 NEW — Suspend / Reactivate Customer
+        Route::post('/customers/{customer}/toggle-suspend',
+            [AdminCustomerController::class, 'toggleSuspend']
+        )->name('customers.toggleSuspend');
+
+        // ============================
+        // LOANS
+        // ============================
         Route::resource('loans', AdminLoanController::class);
         Route::post('/loans/{loan}/record-payment', [AdminLoanController::class, 'recordPayment']);
 
+        // ============================
+        // REPORTS
+        // ============================
         Route::resource('reports', AdminReportsController::class)->only(['index', 'show']);
         Route::post('/reports/{id}/send-agreement', [AdminReportsController::class, 'sendAgreement'])
             ->name('reports.sendAgreement');
         Route::post('/reports/clear-failures', [AdminReportsController::class, 'clearEmailFailures'])
             ->name('reports.clearEmailFailures');
 
+        // ============================
+        // PAYMENTS
+        // ============================
         Route::resource('payments', AdminPaymentController::class)->only(['index', 'show']);
 
         // SETTINGS
