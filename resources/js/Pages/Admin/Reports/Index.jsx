@@ -1,6 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { printSection } from "@/utils/printSection";
 
 // Simple fallback confirm
@@ -27,7 +27,6 @@ export default function ReportsIndex() {
     const {
         loans = [],
         failures = [],
-        filters = {},
         auth = {},
         basePath = "admin",
         flash = {},
@@ -35,26 +34,39 @@ export default function ReportsIndex() {
 
     const user = auth?.user || {};
     const confirm = useConfirm();
-    const [q, setQ] = useState(filters.q || "");
+
+    // 🟢 Instant search text
+    const [q, setQ] = useState("");
+
     const tableRef = useRef(null);
 
     const canManage =
         ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
         user?.is_super_admin;
 
-    // Debounced search
+    // 🔔 Flash Notifications
     useEffect(() => {
-        if (q === "" && !filters.q) return;
-        const timeout = setTimeout(() => {
-            router.get(
-                route(`${basePath}.reports.index`),
-                { q: q || undefined },
-                { preserveScroll: true, preserveState: true, replace: true },
-            );
-        }, 400);
+        if (flash?.success) window.toast?.success?.(flash.success);
+        if (flash?.error) window.toast?.error?.(flash.error);
+    }, [flash]);
 
-        return () => clearTimeout(timeout);
-    }, [q]);
+    /* ===========================================================
+       🔥 INSTANT CLIENT-SIDE SEARCH — no router.get()
+       =========================================================== */
+    const filteredLoans = useMemo(() => {
+        if (!q) return loans;
+
+        const term = q.toLowerCase();
+
+        return loans.filter((loan) => {
+            return (
+                loan.client_name?.toLowerCase().includes(term) ||
+                (loan.id + "").includes(term) ||
+                (loan.amount + "").includes(term) ||
+                (loan.status + "").toLowerCase().includes(term)
+            );
+        });
+    }, [q, loans]);
 
     // Print
     const handlePrint = () => {
@@ -109,12 +121,6 @@ export default function ReportsIndex() {
             },
         );
     };
-
-    // Flash messages
-    useEffect(() => {
-        if (flash?.success) window.toast?.success?.(flash.success);
-        if (flash?.error) window.toast?.error?.(flash.error);
-    }, [flash]);
 
     return (
         <AuthenticatedLayout
@@ -218,8 +224,8 @@ export default function ReportsIndex() {
                         </thead>
 
                         <tbody>
-                            {loans.length ? (
-                                loans.map((loan) => (
+                            {filteredLoans.length ? (
+                                filteredLoans.map((loan) => (
                                     <tr
                                         key={loan.id}
                                         className="hover:bg-gray-50"

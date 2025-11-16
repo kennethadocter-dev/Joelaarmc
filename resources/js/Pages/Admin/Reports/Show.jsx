@@ -4,9 +4,6 @@ import { useMemo, useState } from "react";
 import html2pdf from "html2pdf.js";
 import Toast from "@/Components/Toast"; // Notification Toast
 
-// ❌ REMOVE THIS — IT BREAKS SUPERADMIN ROUTES
-// import { route } from "ziggy-js";
-
 // 💰 Currency formatter
 const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
 
@@ -100,23 +97,9 @@ export default function ReportShow() {
         loan.client_name
     } (Borrower).`;
 
-    /** 🖨 Print document */
+    /** 🖨 Print Preview */
     const handlePrint = () => {
-        const element = document.getElementById("agreement-wrapper");
-        if (!element)
-            return setToast({
-                message: "⚠️ Agreement section not found!",
-                type: "error",
-            });
-
-        const opt = {
-            margin: 0.4,
-            image: { type: "jpeg", quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: "in", format: "A4", orientation: "portrait" },
-        };
-
-        html2pdf().set(opt).from(element).save();
+        window.print();
     };
 
     /** 💾 Download PDF file */
@@ -200,25 +183,25 @@ export default function ReportShow() {
                     <div className="flex items-center gap-3 flex-wrap">
                         <button
                             onClick={handlePrint}
-                            className="px-4 py-2 bg-gray-800 text-white rounded-md shadow hover:bg-gray-900 transition"
+                            className="px-4 py-2 bg-gray-800 text-white rounded-md shadow hover:bg-gray-900 transition no-print"
                         >
                             🖨 Print
                         </button>
                         <button
                             onClick={handleDownload}
-                            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition shadow"
+                            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition shadow no-print"
                         >
                             ⬇ Download
                         </button>
                         <button
                             onClick={handleSendEmail}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition shadow"
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition shadow no-print"
                         >
                             📧 Send Email
                         </button>
                         <button
                             onClick={handleRefresh}
-                            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow"
+                            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow no-print"
                         >
                             🔄 Refresh
                         </button>

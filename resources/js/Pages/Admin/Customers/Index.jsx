@@ -1,6 +1,6 @@
 import AuthenticatedLayout, { useConfirm } from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, usePage, router } from "@inertiajs/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 export default function AdminCustomersIndex() {
     const {
@@ -13,21 +13,16 @@ export default function AdminCustomersIndex() {
     } = usePage().props;
 
     const confirm = useConfirm();
-    const [search, setSearch] = useState(filters.search || "");
+
+    // 🔍 instant search text
+    const [search, setSearch] = useState("");
+
     const userRole = auth?.user?.role?.toLowerCase?.() || "";
 
-    /* 
-    ===========================================
-     ROLE PERMISSION RULES
-    ===========================================
-    */
-
-    // staff + admin + superadmin can view + create loan + edit
     const canManage =
         ["admin", "staff", "superadmin"].includes(userRole) ||
         auth?.user?.is_super_admin;
 
-    // ONLY admin & superadmin can delete
     const canDelete =
         ["admin", "superadmin"].includes(userRole) ||
         auth?.user?.is_super_admin;
@@ -38,21 +33,23 @@ export default function AdminCustomersIndex() {
         if (flash?.error) window.toast?.error?.(flash.error);
     }, [flash]);
 
-    /* Search */
-    const handleSearch = (e) => {
-        e.preventDefault();
-        router.get(
-            `/${basePath}/customers`,
-            { search },
-            { preserveState: true },
-        );
-    };
+    /* =====================================================
+       🔥 INSTANT FILTERED LIST (no reload, no backend)
+       ===================================================== */
+    const filteredCustomers = useMemo(() => {
+        if (!search) return customers;
 
-    /* Pagination */
-    const handlePageChange = (url) => {
-        if (!url) return;
-        router.get(url, { search }, { preserveScroll: true });
-    };
+        const term = search.toLowerCase();
+
+        return customers.filter((c) =>
+            [
+                c.full_name?.toLowerCase(),
+                c.phone?.toLowerCase(),
+                c.community?.toLowerCase(),
+                (c.loans?.length + "")?.toLowerCase(),
+            ].some((v) => v?.includes(term)),
+        );
+    }, [search, customers]);
 
     /* Delete */
     const confirmDelete = (customer) => {
@@ -91,11 +88,8 @@ export default function AdminCustomersIndex() {
             <Head title="Customers" />
 
             <div className="py-6 max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
-                {/* Search */}
-                <form
-                    onSubmit={handleSearch}
-                    className="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4"
-                >
+                {/* 🔍 Instant search bar */}
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4">
                     <div className="flex items-center space-x-2 w-full sm:w-auto">
                         <input
                             type="text"
@@ -104,12 +98,6 @@ export default function AdminCustomersIndex() {
                             onChange={(e) => setSearch(e.target.value)}
                             className="border rounded-lg px-3 py-2 text-sm w-full sm:w-80 focus:ring-2 focus:ring-blue-600 outline-none"
                         />
-                        <button
-                            type="submit"
-                            className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-                        >
-                            Search
-                        </button>
                     </div>
 
                     {canManage && (
@@ -120,7 +108,7 @@ export default function AdminCustomersIndex() {
                             + Add Customer
                         </Link>
                     )}
-                </form>
+                </div>
 
                 {/* Table */}
                 <div className="bg-white shadow-sm rounded-lg overflow-hidden">
@@ -143,8 +131,8 @@ export default function AdminCustomersIndex() {
                         </thead>
 
                         <tbody>
-                            {customers.length > 0 ? (
-                                customers.map((c) => (
+                            {filteredCustomers.length > 0 ? (
+                                filteredCustomers.map((c) => (
                                     <tr
                                         key={c.id}
                                         className="border-t hover:bg-gray-50 transition text-sm"
@@ -179,7 +167,6 @@ export default function AdminCustomersIndex() {
 
                                         <td className="px-4 py-2 text-center">
                                             <div className="flex justify-center gap-3 flex-wrap text-sm font-medium">
-                                                {/* View Allowed for ALL */}
                                                 <Link
                                                     href={route(
                                                         `${basePath}.customers.show`,
@@ -190,7 +177,6 @@ export default function AdminCustomersIndex() {
                                                     View
                                                 </Link>
 
-                                                {/* Edit (Admin + Staff + Superadmin) */}
                                                 {canManage && (
                                                     <Link
                                                         href={route(
@@ -203,7 +189,6 @@ export default function AdminCustomersIndex() {
                                                     </Link>
                                                 )}
 
-                                                {/* Create Loan (Admin + Staff + Superadmin) */}
                                                 {canManage && (
                                                     <Link
                                                         href={route(
@@ -217,29 +202,12 @@ export default function AdminCustomersIndex() {
                                                                     c.loan_amount_requested,
                                                             },
                                                         )}
-                                                        className={`text-green-600 hover:underline ${
-                                                            c.loans?.length >= 3
-                                                                ? "opacity-50 pointer-events-none"
-                                                                : ""
-                                                        }`}
-                                                        onClick={(e) => {
-                                                            if (
-                                                                c.loans
-                                                                    ?.length >=
-                                                                3
-                                                            ) {
-                                                                e.preventDefault();
-                                                                window.toast?.error?.(
-                                                                    "⚠️ Customer already has 3 loans.",
-                                                                );
-                                                            }
-                                                        }}
+                                                        className="text-green-600 hover:underline"
                                                     >
                                                         Create Loan
                                                     </Link>
                                                 )}
 
-                                                {/* DELETE - ONLY ADMIN + SUPERADMIN */}
                                                 {canDelete && (
                                                     <span
                                                         onClick={() =>
@@ -267,25 +235,6 @@ export default function AdminCustomersIndex() {
                         </tbody>
                     </table>
                 </div>
-
-                {/* Pagination */}
-                {pagination?.links?.length > 3 && (
-                    <div className="flex justify-center space-x-2 mt-4">
-                        {pagination.links.map((link, i) => (
-                            <button
-                                key={i}
-                                disabled={!link.url}
-                                onClick={() => handlePageChange(link.url)}
-                                className={`px-3 py-1 rounded-md text-sm ${
-                                    link.active
-                                        ? "bg-blue-600 text-white"
-                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                } ${!link.url ? "opacity-50 cursor-not-allowed" : ""}`}
-                                dangerouslySetInnerHTML={{ __html: link.label }}
-                            />
-                        ))}
-                    </div>
-                )}
             </div>
         </AuthenticatedLayout>
     );
