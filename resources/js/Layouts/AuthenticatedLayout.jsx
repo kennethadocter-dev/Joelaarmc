@@ -60,7 +60,7 @@ export default function AuthenticatedLayout({ header, children }) {
                             <button
                                 onClick={() => setOpen(!open)}
                                 className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 
-                                dark:bg-gray-700 dark:hover:bg-gray-600 px-3 py-2 rounded-lg transition"
+                                    dark:bg-gray-700 dark:hover:bg-gray-600 px-3 py-2 rounded-lg transition"
                             >
                                 <FaUserCircle className="text-gray-600 dark:text-gray-300 text-2xl" />
                                 <span className="text-gray-700 dark:text-gray-200 font-medium capitalize">
@@ -80,15 +80,28 @@ export default function AuthenticatedLayout({ header, children }) {
                                         href={route("profile.edit")}
                                         onClick={() => setOpen(false)}
                                         className="block px-4 py-2 text-gray-700 dark:text-gray-200 
-                                        hover:bg-gray-100 dark:hover:bg-gray-700"
+                                            hover:bg-gray-100 dark:hover:bg-gray-700"
                                     >
                                         Edit Profile
                                     </Link>
 
+                                    {/* SETTINGS LINK APPEARS FOR ADMIN + SUPERADMIN */}
+                                    {(user?.role === "admin" ||
+                                        user?.role === "superadmin") && (
+                                        <Link
+                                            href={route("admin.settings")}
+                                            onClick={() => setOpen(false)}
+                                            className="block px-4 py-2 text-gray-700 dark:text-gray-200 
+                                                hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        >
+                                            Settings
+                                        </Link>
+                                    )}
+
                                     <button
                                         onClick={handleLogout}
                                         className="w-full text-left px-4 py-2 bg-red-600 text-white 
-                                        hover:bg-red-700 rounded-sm transition"
+                                            hover:bg-red-700 rounded-sm transition"
                                     >
                                         Logout
                                     </button>
@@ -106,9 +119,8 @@ export default function AuthenticatedLayout({ header, children }) {
                             <button
                                 onClick={() => window.history.back()}
                                 className="mb-4 px-4 py-2 bg-gray-200 dark:bg-gray-700 
-                                           text-gray-700 dark:text-gray-200 
-                                           rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 
-                                           transition"
+                                    text-gray-700 dark:text-gray-200 rounded-lg 
+                                    hover:bg-gray-300 dark:hover:bg-gray-600 transition"
                             >
                                 ← Back
                             </button>
