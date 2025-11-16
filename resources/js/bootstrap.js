@@ -1,67 +1,92 @@
 import axios from "axios";
+
 window.axios = axios;
 
-// Detect production correctly
-const IS_PRODUCTION =
-    window.location.hostname !== "127.0.0.1" &&
-    window.location.hostname !== "localhost";
-
-// Backend API endpoint
-window.axios.defaults.baseURL = IS_PRODUCTION
-    ? "https://joelaarmc.com"
-    : "http://127.0.0.1:8000";
-
-// Important
+// -------------------------------------------------------
+// BASIC AXIOS SETUP
+// -------------------------------------------------------
 window.axios.defaults.withCredentials = true;
 window.axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
-// Load CSRF token
-function loadCsrfFromMeta() {
+// -------------------------------------------------------
+// DETECT IF PRODUCTION OR LOCAL
+// -------------------------------------------------------
+const hostname = window.location.hostname;
+
+const IS_PRODUCTION =
+    hostname === "joelaarmc.com" ||
+    hostname === "www.joelaarmc.com";
+
+// -------------------------------------------------------
+// FORCE CORRECT BACKEND URL
+// -------------------------------------------------------
+window.axios.defaults.baseURL = IS_PRODUCTION
+    ? "https://joelaarmc.com"   // LIVE SERVER URL
+    : "http://127.0.0.1:8000";  // LOCAL DEV URL
+
+console.log("AXIOS baseURL:", window.axios.defaults.baseURL);
+
+// -------------------------------------------------------
+// LOAD CSRF TOKEN FROM META TAG
+// -------------------------------------------------------
+function loadCsrf() {
     const tag = document.querySelector('meta[name="csrf-token"]');
     if (!tag) return;
     const token = tag.content;
     window.axios.defaults.headers.common["X-CSRF-TOKEN"] = token;
 }
-loadCsrfFromMeta();
 
-// Refresh CSRF
-async function refreshCsrfToken() {
+loadCsrf();
+
+// -------------------------------------------------------
+// AUTO REFRESH CSRF TOKEN (PREVENTS 419 ERRORS)
+// -------------------------------------------------------
+async function refreshCsrf() {
     try {
         const res = await fetch("/csrf-check", {
             credentials: "include",
             headers: { "X-Requested-With": "XMLHttpRequest" },
         });
 
-        const data = await res.json();
-        if (!data?.csrfToken) return;
+        const text = await res.text();
 
-        window.axios.defaults.headers.common["X-CSRF-TOKEN"] = data.csrfToken;
+        if (text.startsWith("<!DOCTYPE")) {
+            console.warn("User logged out.");
+            return;
+        }
 
-        const meta = document.querySelector('meta[name="csrf-token"]');
-        if (meta) meta.setAttribute("content", data.csrfToken);
+        const data = JSON.parse(text);
+        if (!data.csrfToken) return;
 
-        console.log("🔄 CSRF token refreshed");
+        const token = data.csrfToken;
+
+        window.axios.defaults.headers.common["X-CSRF-TOKEN"] = token;
+
+        const meta = document.querySelector('meta[name=\"csrf-token\"]');
+        if (meta) meta.setAttribute("content", token);
+
+        console.log("CSRF refreshed");
     } catch (e) {
-        console.warn("⚠️ CSRF refresh failed");
+        console.warn("CSRF refresh failed:", e);
     }
 }
 
-// Refresh every 10 mins
-setInterval(refreshCsrfToken, 600000);
+setInterval(refreshCsrf, 600000); // refresh every 10 mins
 
-// Refresh on Inertia navigation
-document.addEventListener("inertia:navigate", refreshCsrfToken);
+document.addEventListener("inertia:navigate", () =>
+    refreshCsrf()
+);
 
-// Auto-retry 419 errors
+// -------------------------------------------------------
+// AXIOS INTERCEPTOR: RETRY AFTER 419
+// -------------------------------------------------------
 window.axios.interceptors.response.use(
-    (resp) => resp,
+    (res) => res,
     async (error) => {
         if (error.response?.status === 419) {
-            await refreshCsrfToken();
+            await refreshCsrf();
             return window.axios(error.config);
         }
         return Promise.reject(error);
-    },
+    }
 );
-
-console.log("✅ Axios + CSRF loaded");

@@ -11,16 +11,18 @@ export default defineConfig({
         react(),
     ],
 
+    define: {
+        __BACKEND_URL__: JSON.stringify(process.env.APP_URL),
+    },
+
     build: {
         manifest: true,
         outDir: "public/build",
         emptyOutDir: true,
         rollupOptions: {
-            output: {
-                assetFileNames: "assets/[name]-[hash][extname]",
-                chunkFileNames: "assets/[name]-[hash].js",
-                entryFileNames: "assets/[name]-[hash].js",
-            },
+            assetFileNames: "assets/[name]-[hash][extname]",
+            chunkFileNames: "assets/[name]-[hash].js",
+            entryFileNames: "assets/[name]-[hash].js",
         },
     },
 
