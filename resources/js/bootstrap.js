@@ -1,78 +1,67 @@
 import axios from "axios";
 window.axios = axios;
 
-// Detect environment correctly
+// Detect production correctly
 const IS_PRODUCTION =
     window.location.hostname !== "127.0.0.1" &&
     window.location.hostname !== "localhost";
 
-// Force correct backend URL
+// Backend API endpoint
 window.axios.defaults.baseURL = IS_PRODUCTION
-    ? "https://joelaarmc.com" // Live server
-    : "http://127.0.0.1:8000"; // Local dev
+    ? "https://joelaarmc.com"
+    : "http://127.0.0.1:8000";
 
+// Important
 window.axios.defaults.withCredentials = true;
 window.axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
-// ---------------- Load token from <meta> ----------------
+// Load CSRF token
 function loadCsrfFromMeta() {
     const tag = document.querySelector('meta[name="csrf-token"]');
-    if (!tag) return null;
+    if (!tag) return;
     const token = tag.content;
     window.axios.defaults.headers.common["X-CSRF-TOKEN"] = token;
-    return token;
 }
-
 loadCsrfFromMeta();
 
-// ---------------- Safe Refresh Function ----------------
-async function refreshCsrfToken(label = "CSRF refreshed") {
+// Refresh CSRF
+async function refreshCsrfToken() {
     try {
         const res = await fetch("/csrf-check", {
             credentials: "include",
             headers: { "X-Requested-With": "XMLHttpRequest" },
         });
 
-        const text = await res.text();
+        const data = await res.json();
+        if (!data?.csrfToken) return;
 
-        // If backend returned HTML (means logged out)
-        if (text.startsWith("<!DOCTYPE") || text.startsWith("<html")) {
-            console.warn(
-                "⚠️ CSRF refresh returned HTML — probably logged out.",
-            );
-            return;
-        }
+        window.axios.defaults.headers.common["X-CSRF-TOKEN"] = data.csrfToken;
 
-        const data = JSON.parse(text);
-        const csrf = data.csrfToken || data.csrf;
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        if (meta) meta.setAttribute("content", data.csrfToken);
 
-        if (!csrf) return;
-
-        window.axios.defaults.headers.common["X-CSRF-TOKEN"] = csrf;
-        const meta = document.querySelector('meta[name=\"csrf-token\"]');
-        if (meta) meta.setAttribute("content", csrf);
-
-        console.log("🔄", label);
-    } catch {
-        console.warn("⚠️ CSRF refresh failed silently");
+        console.log("🔄 CSRF token refreshed");
+    } catch (e) {
+        console.warn("⚠️ CSRF refresh failed");
     }
 }
 
-setInterval(() => refreshCsrfToken("auto-refresh"), 600000);
+// Refresh every 10 mins
+setInterval(refreshCsrfToken, 600000);
 
-document.addEventListener("inertia:navigate", () =>
-    refreshCsrfToken("navigation refresh"),
-);
+// Refresh on Inertia navigation
+document.addEventListener("inertia:navigate", refreshCsrfToken);
 
+// Auto-retry 419 errors
 window.axios.interceptors.response.use(
-    (res) => res,
+    (resp) => resp,
     async (error) => {
         if (error.response?.status === 419) {
-            await refreshCsrfToken("retry after 419");
+            await refreshCsrfToken();
             return window.axios(error.config);
         }
         return Promise.reject(error);
     },
 );
 
-console.log("✅ CSRF protection loaded");
+console.log("✅ Axios + CSRF loaded");
