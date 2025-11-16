@@ -1,6 +1,11 @@
 import axios from "axios";
 
 window.axios = axios;
+axios.defaults.withCredentials = true;
+
+axios.defaults.baseURL = "https://joelaarmc.com";
+
+axios.get("/sanctum/csrf-cookie");
 
 // -------------------------------------------------------
 // BASIC AXIOS SETUP
