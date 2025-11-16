@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import laravel from "laravel-vite-plugin";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
     plugins: [
         laravel({
             input: ["resources/js/app.jsx", "resources/css/app.css"],
@@ -11,15 +11,18 @@ export default defineConfig({
         react(),
     ],
 
+    // IMPORTANT
+    base: command === "build" ? "/build/" : "/",
+
     build: {
         manifest: true,
         outDir: "public/build",
         emptyOutDir: true,
         rollupOptions: {
             output: {
-                assetFileNames: "assets/[name]-[hash][extname]",
-                chunkFileNames: "assets/[name]-[hash].js",
                 entryFileNames: "assets/[name]-[hash].js",
+                chunkFileNames: "assets/[name]-[hash].js",
+                assetFileNames: "assets/[name]-[hash][extname]",
             },
         },
     },
@@ -32,10 +35,4 @@ export default defineConfig({
             host: "127.0.0.1",
         },
     },
-
-    resolve: {
-        alias: {
-            "@": "/resources/js",
-        },
-    },
-});
+}));
