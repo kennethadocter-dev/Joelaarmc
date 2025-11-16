@@ -11,19 +11,31 @@ export default defineConfig(({ command }) => ({
         react(),
     ],
 
+<<<<<<< HEAD
     // IMPORTANT
     base: command === "build" ? "/build/" : "/",
+=======
+    define: {
+        __BACKEND_URL__: JSON.stringify(process.env.APP_URL),
+    },
+>>>>>>> 31dd85b73dfdba697dc86d8bc09635e8523f8446
 
     build: {
         manifest: true,
         outDir: "public/build",
         emptyOutDir: true,
         rollupOptions: {
+<<<<<<< HEAD
             output: {
                 entryFileNames: "assets/[name]-[hash].js",
                 chunkFileNames: "assets/[name]-[hash].js",
                 assetFileNames: "assets/[name]-[hash][extname]",
             },
+=======
+            assetFileNames: "assets/[name]-[hash][extname]",
+            chunkFileNames: "assets/[name]-[hash].js",
+            entryFileNames: "assets/[name]-[hash].js",
+>>>>>>> 31dd85b73dfdba697dc86d8bc09635e8523f8446
         },
     },
 
