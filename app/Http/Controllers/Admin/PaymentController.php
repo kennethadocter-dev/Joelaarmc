@@ -9,27 +9,20 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
 use App\Helpers\ActivityLogger;
-use App\Helpers\SmsNotifier;
 
 class PaymentController extends Controller
 {
-    /** 🔧 Determine current base route prefix */
+    /** Determine base route prefix */
     private function basePath()
     {
         $u = auth()->user();
-        if (!$u) {
-            Log::warning('⚠️ basePath() called with no authenticated user');
-            return 'admin';
-        }
-
-        return ($u->is_super_admin || $u->role === 'superadmin')
+        return ($u && ($u->is_super_admin || $u->role === 'superadmin'))
             ? 'superadmin'
             : 'admin';
     }
 
-    /** 📋 List all payments */
+    /** List all payments */
     public function index(Request $request)
     {
         try {
@@ -42,49 +35,47 @@ class PaymentController extends Controller
                 });
             }
 
-            $payments = $query->get();
-
             return Inertia::render('Admin/Payments/Index', [
-                'payments' => $payments,
-                'auth' => ['user' => auth()->user()],
-                'flash' => [
+                'payments' => $query->get(),
+                'auth'     => ['user' => auth()->user()],
+                'flash'    => [
                     'success' => session('success'),
-                    'error' => session('error'),
+                    'error'   => session('error'),
                 ],
             ]);
         } catch (\Throwable $e) {
-            return $this->showDebugError($e, '⚠️ Failed to load payment list.');
+            return $this->debugError($e, '⚠️ Failed to load payment list.');
         }
     }
 
-    /** 🆕 Show "Record Cash Payment" page */
+    /** Show Record Cash Payment page */
     public function create(Request $request)
     {
         try {
             $loanId = $request->query('loan_id');
             if (!$loanId) {
-                return redirect()->back()->with('error', 'Missing loan ID.');
+                return back()->with('error', 'Missing loan ID.');
             }
 
             $loan = Loan::with('customer')->findOrFail($loanId);
 
             return Inertia::render('Admin/Payments/RecordPayment', [
-                'loan' => $loan,
+                'loan'           => $loan,
                 'expectedAmount' => $loan->amount_remaining ?? 0,
-                'redirect' => $request->query('redirect'),
-                'auth' => ['user' => auth()->user()],
-                'basePath' => $this->basePath(),
-                'flash' => [
+                'redirect'       => $request->query('redirect'),
+                'auth'           => ['user' => auth()->user()],
+                'basePath'       => $this->basePath(),
+                'flash'          => [
                     'success' => session('success'),
-                    'error' => session('error'),
+                    'error'   => session('error'),
                 ],
             ]);
         } catch (\Throwable $e) {
-            return $this->showDebugError($e, '⚠️ Unable to load Cash Payment page.');
+            return $this->debugError($e, '⚠️ Unable to load Cash Payment page.');
         }
     }
 
-    /** 💵 Store cash payment and redirect back */
+    /** Store cash payment safely (duplicate-proof) */
     public function store(Request $request)
     {
         try {
@@ -103,53 +94,56 @@ class PaymentController extends Controller
                 'note'    => 'nullable|string|max:500',
             ]);
 
+            $loan   = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
+            $userId = auth()->id() ?? 1;
+            $amount = floatval($validated['amount']);
+
+            /** Idempotency Hash — prevents double-tap */
+            $hash = md5($loan->id . '|' . $amount . '|' . now()->format('YmdHis'));
+
             DB::beginTransaction();
 
-            $loan = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
-            $userId = auth()->id() ?? 1;
+            $existing = Payment::where('idempotency_key', $hash)->first();
+            if ($existing) {
+                DB::rollBack();
 
-            // 💾 Create payment record
-            $payment = Payment::create([
-                'loan_id'        => $loan->id,
-                'received_by'    => $userId,
-                'amount'         => $validated['amount'],
-                'paid_at'        => now(),
-                'payment_method' => 'cash',
-                'reference'      => 'CASH-' . now()->timestamp,
-                'note'           => $validated['note'] ?? 'Cash payment recorded',
-            ]);
+                Log::warning('⚠️ Duplicate payment attempt blocked', [
+                    'loan_id' => $loan->id,
+                    'user_id' => $userId,
+                    'hash'    => $hash,
+                ]);
 
-            Log::info('✅ Payment created successfully', ['payment_id' => $payment->id]);
+                return redirect()
+                    ->route($this->basePath() . '.loans.show', $loan->id)
+                    ->with('success', '⚠️ Duplicate payment ignored.');
+            }
 
-            // 🔄 Apply payment to this specific loan
-            $this->applyPaymentToLoan($loan, $validated['amount']);
+            $payment = Payment::firstOrCreate(
+                ['idempotency_key' => $hash],
+                [
+                    'loan_id'        => $loan->id,
+                    'received_by'    => $userId,
+                    'amount'         => $amount,
+                    'paid_at'        => now(),
+                    'payment_method' => 'cash',
+                    'reference'      => 'CASH-' . now()->timestamp,
+                    'note'           => $validated['note'] ?? 'Cash payment recorded',
+                ]
+            );
+
+            if ($payment->wasRecentlyCreated) {
+                // Distribute payment across loan schedules
+                $this->applyPaymentToLoan($loan, $amount);
+            }
+
             DB::commit();
 
-            ActivityLogger::log('Cash Payment', "₵{$validated['amount']} recorded for Loan #{$loan->id}");
-
-            /* 📲 SMS Notifications */
-            try {
-                if (!empty($loan->customer->phone)) {
-                    $msg = "Hi {$loan->customer->full_name}, your payment of ₵" . number_format($validated['amount'], 2) . " has been received. Thank you!";
-                    SmsNotifier::send($loan->customer->phone, $msg);
-                }
-
-                if ($loan->amount_remaining <= 0.01) {
-                    $msg2 = "🎉 Hi {$loan->customer->full_name}, congratulations! Your loan has been fully paid off. We appreciate your commitment.";
-                    SmsNotifier::send($loan->customer->phone, $msg2);
-                }
-            } catch (\Throwable $ex) {
-                Log::warning('⚠️ SMS Notification Failed', ['error' => $ex->getMessage()]);
-            }
-
-            $redirectUrl = $request->input('redirect');
-            if ($redirectUrl) {
-                return redirect($redirectUrl)->with('success', '✅ Cash payment recorded successfully!');
-            }
+            ActivityLogger::log('Cash Payment', "₵{$amount} recorded for Loan #{$loan->id}");
 
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
                 ->with('success', '✅ Cash payment recorded successfully!');
+
         } catch (\Throwable $e) {
             DB::rollBack();
 
@@ -162,222 +156,63 @@ class PaymentController extends Controller
         }
     }
 
-    /** 💳 Initialize Paystack Payment */
-    public function initialize(Request $request)
+    /** Apply payment to loan schedule (no DB transaction here; caller handles it) */
+    private function applyPaymentToLoan(Loan $loan, float $amount): void
     {
-        try {
-            $validated = $request->validate([
-                'email'   => 'required|email',
-                'amount'  => 'required|numeric|min:1',
-                'loan_id' => 'nullable|exists:loans,id',
-                'method'  => 'nullable|string',
-            ]);
+        $remaining = round($amount, 2);
 
-            $amountInKobo = $validated['amount'] * 100;
+        $schedules = $loan->loanSchedules()
+            ->where(function ($q) {
+                $q->where('is_paid', false)->orWhereNull('is_paid');
+            })
+            ->orderBy('payment_number')
+            ->lockForUpdate()
+            ->get();
 
-            $callbackRoute = match (true) {
-                auth()->user()?->is_super_admin,
-                auth()->user()?->role === 'superadmin' => 'superadmin.paystack.callback',
-                default => 'admin.paystack.callback',
-            };
-
-            $callbackUrl = route($callbackRoute, [], true);
-
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
-                'Content-Type'  => 'application/json',
-            ])->post(
-                env('PAYSTACK_PAYMENT_URL', 'https://api.paystack.co') . '/transaction/initialize',
-                [
-                    'email'        => $validated['email'],
-                    'amount'       => $amountInKobo,
-                    'callback_url' => $callbackUrl,
-                    'metadata'     => [
-                        'loan_id'      => $validated['loan_id'] ?? null,
-                        'initiated_by' => auth()->user()?->name ?? 'System',
-                        'method'       => $validated['method'] ?? 'paystack',
-                        'environment'  => app()->environment(),
-                        'app_url'      => config('app.url'),
-                    ],
-                ]
-            );
-
-            $data = $response->json();
-
-            if (isset($data['status']) && $data['status'] === true && isset($data['data']['authorization_url'])) {
-                return response()->json([
-                    'redirect_url' => $data['data']['authorization_url'],
-                    'data' => $data['data'],
-                ]);
+        foreach ($schedules as $schedule) {
+            if ($remaining <= 0) {
+                break;
             }
 
-            Log::warning('⚠️ Paystack initialization failed', ['response' => $data]);
-            return response()->json(['error' => 'Unable to initialize Paystack payment.'], 422);
-        } catch (\Throwable $e) {
-            return $this->showDebugError($e, '⚠️ Paystack init failed.');
+            $balance = round(max(0, $schedule->amount - $schedule->amount_paid), 2);
+            if ($balance <= 0) {
+                continue;
+            }
+
+            $applied = min($remaining, $balance);
+            $schedule->amount_paid += $applied;
+            $schedule->amount_left = max(0, round($schedule->amount - $schedule->amount_paid, 2));
+            $schedule->is_paid     = $schedule->amount_left <= 0.01;
+            $schedule->note        = $schedule->is_paid
+                ? "Installment fully paid on " . now()->format('Y-m-d')
+                : "Partial payment on " . now()->format('Y-m-d');
+
+            $schedule->save();
+
+            $remaining -= $applied;
         }
+
+        Log::info('💰 Payment applied to loan schedules', [
+            'loan_id'            => $loan->id,
+            'original_amount'    => $amount,
+            'unapplied_remaining'=> $remaining,
+        ]);
+
+        // 📌 We do NOT touch loan totals here.
+        // Loan totals are recalculated via Payment model events using Loan::recalculateSummary().
     }
 
-    /** 💳 Handle Paystack callback */
-    public function callback(Request $request)
+    /** Debug output */
+    private function debugError(\Throwable $e, string $msg)
     {
-        try {
-            $reference = $request->query('reference');
-            if (!$reference) {
-                return redirect()->route($this->basePath() . '.payments.index')
-                    ->with('error', 'Missing payment reference.');
-            }
-
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . env('PAYSTACK_SECRET_KEY'),
-            ])->get('https://api.paystack.co/transaction/verify/' . $reference);
-
-            $data = $response->json();
-
-            if (!isset($data['data']['status']) || $data['data']['status'] !== 'success') {
-                return redirect()->route($this->basePath() . '.payments.index')
-                    ->with('error', 'Payment verification failed.');
-            }
-
-            $details   = $data['data'];
-            $loanId    = $details['metadata']['loan_id'] ?? null;
-            $amount    = $details['amount'] / 100;
-            $reference = $details['reference'];
-
-            if (!$loanId) {
-                return redirect()->route($this->basePath() . '.payments.index')
-                    ->with('error', 'Missing loan ID in metadata.');
-            }
-
-            $loan = Loan::with(['customer', 'loanSchedules'])->find($loanId);
-            if (!$loan) {
-                return redirect()->route($this->basePath() . '.payments.index')
-                    ->with('error', 'Loan not found.');
-            }
-
-            DB::beginTransaction();
-
-            if (!Payment::where('reference', $reference)->exists()) {
-                Payment::create([
-                    'loan_id'        => $loan->id,
-                    'received_by'    => auth()->id() ?? 1,
-                    'amount'         => $amount,
-                    'paid_at'        => now(),
-                    'payment_method' => 'paystack',
-                    'reference'      => $reference,
-                    'note'           => 'Paid via Paystack',
-                ]);
-
-                $this->applyPaymentToLoan($loan, $amount);
-            }
-
-            DB::commit();
-
-            ActivityLogger::log('Paystack Payment', "₵{$amount} paid online for Loan #{$loan->id}");
-
-            /* 📲 SMS after Paystack payment */
-            try {
-                if (!empty($loan->customer->phone)) {
-                    $msg = "Hi {$loan->customer->full_name}, your online payment of ₵" . number_format($amount, 2) . " has been received successfully!";
-                    SmsNotifier::send($loan->customer->phone, $msg);
-                }
-
-                if ($loan->amount_remaining <= 0.01) {
-                    $msg2 = "🎉 Hi {$loan->customer->full_name}, your loan has been fully paid off. Thank you for your trust in Joelaar Micro-Credit!";
-                    SmsNotifier::send($loan->customer->phone, $msg2);
-                }
-            } catch (\Throwable $ex) {
-                Log::warning('⚠️ SMS Notification Failed', ['error' => $ex->getMessage()]);
-            }
-
-            return redirect()
-                ->route($this->basePath() . '.loans.show', $loan->id)
-                ->with('success', "✅ Payment of ₵{$amount} received via Paystack!");
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return $this->showDebugError($e, '⚠️ Error processing Paystack payment.');
-        }
-    }
-
-    /** 🧮 Apply payment to next unpaid schedules safely (with rollback guard) */
-    private function applyPaymentToLoan(Loan $loan, float $amount)
-    {
-        DB::beginTransaction();
-
-        try {
-            $remaining = round($amount, 2);
-
-            // Load only unpaid schedules for this loan
-            $schedules = $loan->loanSchedules()
-                ->where(function ($q) {
-                    $q->where('is_paid', false)->orWhereNull('is_paid');
-                })
-                ->orderBy('payment_number')
-                ->lockForUpdate()
-                ->get();
-
-            foreach ($schedules as $schedule) {
-                if ($remaining <= 0) break;
-
-                $balance = round(max(0, $schedule->amount - $schedule->amount_paid), 2);
-                if ($balance <= 0) continue;
-
-                $applied = min($remaining, $balance);
-                $schedule->amount_paid += $applied;
-                $schedule->amount_left = max(0, round($schedule->amount - $schedule->amount_paid, 2));
-                $schedule->is_paid     = $schedule->amount_left <= 0.01;
-                $schedule->note        = $schedule->is_paid
-                    ? "Installment fully paid on " . now()->format('Y-m-d')
-                    : "Partial payment on " . now()->format('Y-m-d');
-                $schedule->save();
-
-                $remaining -= $applied;
-            }
-
-            // Recalculate totals
-            $loan->refresh();
-            $loan->amount_paid      = round($loan->loanSchedules()->sum('amount_paid'), 2);
-            $loan->amount_remaining = round($loan->loanSchedules()->sum('amount_left'), 2);
-
-            // Handle rounding drift or overpayment
-            if ($loan->amount_remaining <= 0.01) {
-                $loan->amount_remaining = 0;
-                $loan->status = 'paid';
-            } else {
-                $loan->status = 'active';
-            }
-
-            $loan->save();
-
-            DB::commit();
-
-            Log::info('💰 Payment applied successfully', [
-                'loan_id' => $loan->id,
-                'applied_amount' => $amount,
-                'remaining_balance' => $loan->amount_remaining,
-                'status' => $loan->status,
-            ]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('❌ Error during payment application', [
-                'loan_id' => $loan->id,
-                'error' => $e->getMessage(),
-            ]);
-            throw $e;
-        }
-    }
-
-    /** ⚠️ Show error details */
-    private function showDebugError(\Throwable $e, string $msg)
-    {
-        Log::error('❌ PaymentController', [
+        Log::error('❌ PaymentController Error', [
             'message' => $e->getMessage(),
             'file'    => $e->getFile(),
             'line'    => $e->getLine(),
         ]);
 
         return response()->make("
-            <h2 style='color:red'>⚠️ $msg</h2>
+            <h2 style='color:red'>⚠️ {$msg}</h2>
             <p><strong>{$e->getMessage()}</strong></p>
         ", 500);
     }

@@ -1,8 +1,7 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, usePage, Link } from "@inertiajs/react";
 import { useEffect, useState } from "react";
-import { toast, Toaster } from "react-hot-toast";
-import { route } from "ziggy-js";
+import { route } from "ziggy-js"; // keep this
 
 export default function CustomerCreate() {
     const { basePath = "admin", flash = {} } = usePage().props;
@@ -34,41 +33,55 @@ export default function CustomerCreate() {
 
     const [showPopup, setShowPopup] = useState(false);
 
-    // ✅ Flash feedback for success or error
+    /**
+     * --------------------------------------------------
+     * FLASH MESSAGE HANDLING (GLOBAL TOASTER ONLY)
+     * --------------------------------------------------
+     */
     useEffect(() => {
-        if (flash?.success && flash?.customer) setShowPopup(true);
-        if (flash?.success && !flash?.customer)
-            toast.success(flash.success, { duration: 2000 });
-        if (flash?.error) toast.error(flash.error, { duration: 3000 });
+        if (flash?.success && flash?.customer) {
+            setShowPopup(true);
+        } else if (flash?.success) {
+            window.toast?.success(flash.success);
+        }
+
+        if (flash?.error) {
+            window.toast?.error(flash.error);
+        }
     }, [flash]);
 
+    /**
+     * --------------------------------------------------
+     * SUBMIT
+     * --------------------------------------------------
+     */
     const handleSubmit = (e) => {
         e.preventDefault();
         post(route(`${basePath}.customers.store`), {
             preserveScroll: true,
-            onSuccess: () => reset(),
+            onSuccess: () => {
+                window.toast?.success("Customer added successfully");
+                reset();
+            },
+            onError: () => {
+                window.toast?.error("Failed to save customer");
+            },
         });
     };
 
     return (
         <AuthenticatedLayout
-            header={
-                <h2 className="text-xl font-semibold text-gray-800">
-                    Add Customer
-                </h2>
-            }
+            header={<h2 className="text-xl font-semibold">Add Customer</h2>}
         >
             <Head title="Add Customer" />
-            <Toaster position="top-right" />
 
-            {/* ✅ Success Popup */}
+            {/* SUCCESS POPUP MODAL */}
             {showPopup && flash?.customer && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-20 z-50 animate-fadeIn">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 text-center relative transform animate-slideDown">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 text-center relative animate-slideDown">
                         <button
                             onClick={() => setShowPopup(false)}
                             className="absolute top-3 right-4 text-gray-400 hover:text-gray-600 text-2xl font-bold"
-                            title="Close"
                         >
                             ×
                         </button>
@@ -81,8 +94,7 @@ export default function CustomerCreate() {
                                 Customer Added Successfully!
                             </h3>
                             <p className="text-gray-600 mb-6">
-                                {flash.success ||
-                                    "New customer registered successfully."}
+                                {flash.success}
                             </p>
                         </div>
 
@@ -110,13 +122,13 @@ export default function CustomerCreate() {
                 </div>
             )}
 
-            {/* 🧾 CUSTOMER FORM */}
+            {/* FORM */}
             <div className="py-8 max-w-5xl mx-auto px-4 space-y-6">
                 <form
                     onSubmit={handleSubmit}
                     className="bg-white shadow-md rounded-lg p-6 space-y-8"
                 >
-                    {/* 🧍 Personal Details */}
+                    {/* PERSONAL DETAILS */}
                     <Section title="Personal Details">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Field
@@ -126,6 +138,7 @@ export default function CustomerCreate() {
                                 onChange={(v) => setData("full_name", v)}
                                 error={errors.full_name}
                             />
+
                             <Field
                                 label="Phone *"
                                 required
@@ -133,6 +146,7 @@ export default function CustomerCreate() {
                                 onChange={(v) => setData("phone", v)}
                                 error={errors.phone}
                             />
+
                             <Field
                                 label="Email"
                                 type="email"
@@ -140,17 +154,14 @@ export default function CustomerCreate() {
                                 onChange={(v) => setData("email", v)}
                                 error={errors.email}
                             />
+
                             <SelectField
                                 label="Marital Status"
                                 value={data.marital_status}
                                 onChange={(v) => setData("marital_status", v)}
-                                options={[
-                                    "Single",
-                                    "Married",
-                                    "Divorced",
-                                    "Widowed",
-                                ]}
+                                options={["Single", "Married"]}
                             />
+
                             <SelectField
                                 label="Gender"
                                 value={data.gender}
@@ -160,7 +171,7 @@ export default function CustomerCreate() {
                         </div>
                     </Section>
 
-                    {/* 🏠 Address Info */}
+                    {/* ADDRESS */}
                     <Section title="Address Information">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Field
@@ -196,7 +207,7 @@ export default function CustomerCreate() {
                         </div>
                     </Section>
 
-                    {/* 💼 Employment */}
+                    {/* EMPLOYMENT */}
                     <Section title="Employment Details">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Field
@@ -223,7 +234,7 @@ export default function CustomerCreate() {
                         </div>
                     </Section>
 
-                    {/* 🏦 Bank */}
+                    {/* BANK INFO */}
                     <Section title="Bank Information">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Field
@@ -254,7 +265,7 @@ export default function CustomerCreate() {
                         </div>
                     </Section>
 
-                    {/* 💰 Loan */}
+                    {/* LOAN */}
                     <Section title="Loan Request">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Field
@@ -273,7 +284,7 @@ export default function CustomerCreate() {
                         </div>
                     </Section>
 
-                    {/* 👥 Guarantors */}
+                    {/* GUARANTOR */}
                     <Section title="Guarantor (Optional)">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Field
@@ -297,7 +308,7 @@ export default function CustomerCreate() {
                         </div>
                     </Section>
 
-                    {/* ✅ Submit */}
+                    {/* SUBMIT */}
                     <div className="flex justify-end border-t pt-4">
                         <button
                             type="submit"
@@ -310,6 +321,7 @@ export default function CustomerCreate() {
                 </form>
             </div>
 
+            {/* Animations */}
             <style>{`
                 .input, select {
                     width: 100%;
@@ -332,7 +344,9 @@ export default function CustomerCreate() {
     );
 }
 
-/* 🔹 Helper Components */
+/* -----------------------------------
+   HELPERS
+------------------------------------ */
 function Field({ label, type = "text", value, onChange, required, error }) {
     return (
         <div>

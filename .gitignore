@@ -23,10 +23,10 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 # --- BLOCK THESE FILES FROM EVER BEING PUSHED ---
-resources/js/app.jsx
-resources/js/bootstrap.js
-resources/js/Layouts/AuthenticatedLayout.jsx
-resources/js/Components/Sidebar.jsx
-resources/views/app.blade.php
-vite.config.js
-package-lock.json
+#resources/js/app.jsx
+#resources/js/bootstrap.js
+#resources/js/Layouts/AuthenticatedLayout.jsx
+#resources/js/Components/Sidebar.jsx
+#resources/views/app.blade.php
+#vite.config.js
+#package-lock.json

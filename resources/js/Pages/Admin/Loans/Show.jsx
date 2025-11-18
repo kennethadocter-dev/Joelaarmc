@@ -3,16 +3,12 @@ import { Head, usePage, router } from "@inertiajs/react";
 import { useEffect, useState } from "react";
 
 export default function LoanShow() {
-    const {
-        loan = {},
-        loanSchedules = [],
-        basePath = "admin",
-        flash = {},
-    } = usePage().props;
+    const { loan = {}, basePath = "admin", flash = {} } = usePage().props;
 
     const [showCashModal, setShowCashModal] = useState(false);
     const [cashAmount, setCashAmount] = useState("");
     const [cashNote, setCashNote] = useState("");
+    const [isPaying, setIsPaying] = useState(false);
 
     /* ✅ Flash toast messages */
     useEffect(() => {
@@ -40,16 +36,15 @@ export default function LoanShow() {
                 return "bg-green-100 text-green-700";
             case "pending":
                 return "bg-yellow-100 text-yellow-700";
+            case "overdue":
+                return "bg-red-100 text-red-700";
             default:
                 return "bg-gray-100 text-gray-700";
         }
     };
 
-    // ✅ Use schedules if available
-    const schedules =
-        loan.loan_schedules?.length > 0
-            ? loan.loan_schedules
-            : (loanSchedules ?? []);
+    // ✅ Always use schedules from backend
+    const schedules = loan.loan_schedules ?? [];
 
     // ✅ Calculate totals safely
     const totalWithInterest = schedules.length
@@ -67,9 +62,9 @@ export default function LoanShow() {
         : safeNum(loan.amount_remaining);
 
     const months = safeNum(loan.term_months) || 1;
-    const monthly = totalWithInterest / months;
+    const monthly = months > 0 ? totalWithInterest / months : 0;
 
-    // ✅ Calculate interest based on ₵200 base logic
+    // ✅ Interest based on your ₵200 base logic
     const baseRates = {
         1: 240,
         2: 131 * 2,
@@ -95,18 +90,23 @@ export default function LoanShow() {
         ? "paid"
         : loan.status === "pending"
           ? "pending"
-          : "active";
+          : loan.status === "overdue"
+            ? "overdue"
+            : "active";
 
-    /** 💵 Cash modal handling */
+    /** 💵 Open cash payment modal */
     const openCashModal = () => {
         const nextSchedule = schedules.find((s) => !s.is_paid);
-        if (!nextSchedule)
-            return window.toast?.error?.("All installments are paid!");
+        if (!nextSchedule) {
+            window.toast?.error?.("All installments are paid!");
+            return;
+        }
 
         const remainingAmt =
             safeNum(nextSchedule.amount_left) > 0
                 ? nextSchedule.amount_left
                 : nextSchedule.amount;
+
         setCashAmount(remainingAmt);
         setCashNote(
             `Installment #${nextSchedule.payment_number} due ${formatDate(
@@ -116,45 +116,66 @@ export default function LoanShow() {
         setShowCashModal(true);
     };
 
-    /** 💾 Submit payment */
+    /** 💾 Submit payment → PaymentController@store (idempotent) */
     const submitCashPayment = async () => {
-        if (!cashAmount || safeNum(cashAmount) <= 0)
-            return window.toast?.error?.("Enter a valid amount.");
+        if (isPaying) return; // 🔐 prevent double-clicks
 
-        const loading = window.toast?.loading?.("Recording cash payment...");
+        if (!cashAmount || safeNum(cashAmount) <= 0) {
+            window.toast?.error?.("Enter a valid amount.");
+            return;
+        }
+
+        const csrf = document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute("content");
+
+        if (!csrf) {
+            window.toast?.error?.("Missing CSRF token.");
+            return;
+        }
+
+        const loadingId = window.toast?.loading?.("Recording cash payment...");
+        setIsPaying(true);
+
         try {
-            const res = await fetch(
-                route(`${basePath}.loans.recordPayment`, loan.id),
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-TOKEN": document
-                            .querySelector('meta[name="csrf-token"]')
-                            ?.getAttribute("content"),
-                    },
-                    body: JSON.stringify({
-                        amount: cashAmount,
-                        note: cashNote,
-                    }),
+            const response = await fetch(route(`${basePath}.payments.store`), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-TOKEN": csrf,
+                    Accept: "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
                 },
-            );
+                body: JSON.stringify({
+                    loan_id: loan.id,
+                    amount: cashAmount,
+                    note: cashNote,
+                    redirect: route(`${basePath}.loans.show`, loan.id),
+                }),
+            });
 
-            window.toast?.dismiss?.(loading);
+            window.toast?.dismiss?.(loadingId);
 
-            if (res.ok) {
+            if (response.ok) {
                 window.toast?.success?.("✅ Cash payment recorded!");
-                router.reload();
                 setShowCashModal(false);
                 setCashAmount("");
                 setCashNote("");
+                // 🔄 Reload the loan page with fresh data + flash
+                router.reload({ only: ["loan", "flash"] });
+            } else if (response.status === 422) {
+                window.toast?.error?.(
+                    "Validation failed. Please check amount & try again.",
+                );
             } else {
                 window.toast?.error?.("Failed to record payment.");
             }
-        } catch (e) {
-            window.toast?.dismiss?.(loading);
-            window.toast?.error?.("Error recording payment.");
-            console.error(e);
+        } catch (error) {
+            console.error(error);
+            window.toast?.dismiss?.(loadingId);
+            window.toast?.error?.("Error recording payment. Please try again.");
+        } finally {
+            setIsPaying(false);
         }
     };
 
@@ -181,7 +202,7 @@ export default function LoanShow() {
                             title="Client Information"
                             items={[
                                 ["Name", loan.client_name],
-                                ["Loan ID", `#${loan.id}`],
+                                ["Loan Code", loan.loan_code || `#${loan.id}`],
                                 ["Created By", loan.user?.name || "—"],
                                 [
                                     "Status",
@@ -196,6 +217,7 @@ export default function LoanShow() {
                                 ],
                             ]}
                         />
+
                         <InfoBlock
                             title="Loan Details"
                             items={[
@@ -217,7 +239,7 @@ export default function LoanShow() {
                                               className="font-semibold text-blue-700"
                                           >
                                               {money(
-                                                  loan.expected_interest ||
+                                                  loan.expected_interest ??
                                                       interestAmount,
                                               )}
                                           </span>,
@@ -227,6 +249,7 @@ export default function LoanShow() {
                                 ["Due Date", formatDate(loan.due_date)],
                             ]}
                         />
+
                         <InfoBlock
                             title="Repayment Summary"
                             items={[
@@ -272,9 +295,11 @@ export default function LoanShow() {
                     <div className="flex flex-wrap gap-3">
                         <button
                             onClick={openCashModal}
-                            className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-md"
+                            className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-md disabled:opacity-60"
+                            disabled={isPaying}
                         >
-                            💵 Record Cash Payment
+                            💵{" "}
+                            {isPaying ? "Recording..." : "Record Cash Payment"}
                         </button>
                         <button
                             onClick={payWithPaystack}
@@ -386,7 +411,7 @@ export default function LoanShow() {
                                 money(p.amount),
                                 p.received_by_user?.name || "—",
                                 p.payment_method || "—",
-                                formatDate(p.created_at),
+                                formatDate(p.paid_at || p.created_at),
                                 p.note || "—",
                             ],
                         })) ?? []
@@ -408,6 +433,8 @@ export default function LoanShow() {
                                 className="w-full border rounded-md px-3 py-2"
                                 value={cashAmount}
                                 onChange={(e) => setCashAmount(e.target.value)}
+                                min="0"
+                                step="0.01"
                             />
                             <textarea
                                 placeholder="Note (optional)"
@@ -420,14 +447,16 @@ export default function LoanShow() {
                             <button
                                 onClick={() => setShowCashModal(false)}
                                 className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                                disabled={isPaying}
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={submitCashPayment}
-                                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
+                                disabled={isPaying}
                             >
-                                Save
+                                {isPaying ? "Saving..." : "Save"}
                             </button>
                         </div>
                     </div>

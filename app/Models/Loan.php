@@ -45,6 +45,7 @@ class Loan extends Model
     /* ───────────────────────────────
      | 🔗 RELATIONSHIPS
      ─────────────────────────────── */
+
     public function customer()
     {
         return $this->belongsTo(Customer::class);
@@ -117,12 +118,13 @@ class Loan extends Model
         return round($amount + $this->calculateExpectedInterest(), 2);
     }
 
-    /** 🔄 Recalculate and sync all summary fields */
+    /** 🔄 Recalculate and sync all summary fields (single source of truth) */
     public function recalculateSummary(): void
     {
         try {
-            $this->amount_paid        = $this->payments()->sum('amount');
-            $this->expected_interest  = $this->calculateExpectedInterest();
+            // Payment-based totals
+            $this->amount_paid         = $this->payments()->sum('amount');
+            $this->expected_interest   = $this->calculateExpectedInterest();
             $this->total_with_interest = $this->calculateTotalWithInterest();
 
             // Remaining balance
@@ -131,7 +133,7 @@ class Loan extends Model
 
             // Status logic
             if ($this->amount_remaining <= 0.01) {
-                $this->status = 'paid';
+                $this->status          = 'paid';
                 $this->interest_earned = round($this->amount_paid - $this->amount, 2);
             } elseif ($this->due_date && Carbon::parse($this->due_date)->isPast() && $this->status !== 'paid') {
                 $this->status = 'overdue';
@@ -143,9 +145,9 @@ class Loan extends Model
 
             // Customer totals sync
             if ($this->customer) {
-                $this->customer->total_loans = $this->customer->loans()->sum('amount');
-                $this->customer->total_paid = $this->customer->loans()->sum('amount_paid');
-                $this->customer->total_remaining = $this->customer->loans()->sum('amount_remaining');
+                $this->customer->total_loans        = $this->customer->loans()->sum('amount');
+                $this->customer->total_paid         = $this->customer->loans()->sum('amount_paid');
+                $this->customer->total_remaining    = $this->customer->loans()->sum('amount_remaining');
                 $this->customer->active_loans_count = $this->customer->loans()
                     ->whereIn('status', ['active', 'overdue', 'pending'])
                     ->count();
@@ -169,9 +171,9 @@ class Loan extends Model
     /** Marks loan as fully paid */
     public function markAsPaid(): void
     {
-        $this->status = 'paid';
+        $this->status           = 'paid';
         $this->amount_remaining = 0;
-        $this->interest_earned = round($this->amount_paid - $this->amount, 2);
+        $this->interest_earned  = round($this->amount_paid - $this->amount, 2);
         $this->expected_interest = 0.00;
         $this->saveQuietly();
     }
@@ -186,6 +188,7 @@ class Loan extends Model
     /* ───────────────────────────────
      | ⚙️ MODEL EVENTS (AUTO UPDATES)
      ─────────────────────────────── */
+
     protected static function booted()
     {
         // 🔹 Before saving
@@ -219,9 +222,9 @@ class Loan extends Model
         // 🔹 After delete — refresh customer stats
         static::deleted(function (Loan $loan) {
             if ($loan->customer) {
-                $loan->customer->total_loans = $loan->customer->loans()->sum('amount');
-                $loan->customer->total_paid = $loan->customer->loans()->sum('amount_paid');
-                $loan->customer->total_remaining = $loan->customer->loans()->sum('amount_remaining');
+                $loan->customer->total_loans        = $loan->customer->loans()->sum('amount');
+                $loan->customer->total_paid         = $loan->customer->loans()->sum('amount_paid');
+                $loan->customer->total_remaining    = $loan->customer->loans()->sum('amount_remaining');
                 $loan->customer->active_loans_count = $loan->customer->loans()
                     ->whereIn('status', ['active', 'overdue', 'pending'])
                     ->count();

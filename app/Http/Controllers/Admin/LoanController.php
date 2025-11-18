@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Loan;
-use App\Models\Payment;
 use App\Models\Customer;
 use App\Models\LoanSchedule;
 use Illuminate\Http\Request;
@@ -24,6 +23,7 @@ class LoanController extends Controller
     private function basePath()
     {
         $u = auth()->user();
+
         return ($u && ($u->is_super_admin || $u->role === 'superadmin'))
             ? 'superadmin'
             : 'admin';
@@ -36,6 +36,7 @@ class LoanController extends Controller
             $statusFilter = $request->query('status');
             $clientFilter = $request->query('client');
 
+            // Simple stats; can optimize later if needed
             $summary = [
                 'active' => [
                     'count' => Loan::whereIn('status', ['active', 'overdue'])->count(),
@@ -79,7 +80,10 @@ class LoanController extends Controller
                 'loans'   => $query->get(),
                 'summary' => $summary,
                 'totalExpectedInterest' => round($totalExpectedInterest, 2),
-                'filters' => ['client' => $clientFilter, 'status' => $statusFilter],
+                'filters' => [
+                    'client' => $clientFilter,
+                    'status' => $statusFilter,
+                ],
                 'auth'    => ['user' => auth()->user()],
                 'basePath' => $this->basePath(),
                 'flash'   => [
@@ -117,7 +121,7 @@ class LoanController extends Controller
                 'auth' => ['user' => auth()->user()],
                 'prefill_customer_id' => $customer->id,
                 'prefill_client_name' => $prefillClientName ?: $customer->full_name,
-                'prefill_amount' => $prefillAmount ?: $customer->loan_amount_requested,
+                'prefill_amount'      => $prefillAmount ?: $customer->loan_amount_requested,
                 'basePath' => $this->basePath(),
             ]);
         } catch (\Throwable $e) {
@@ -125,7 +129,7 @@ class LoanController extends Controller
         }
     }
 
-    /** 💾 Store new loan — with clean validation and duplicate handling */
+    /** 💾 Store new loan — with idempotency & notifications */
     public function store(Request $request)
     {
         ini_set('max_execution_time', 45);
@@ -140,15 +144,34 @@ class LoanController extends Controller
                 'start_date'  => 'required|date',
                 'notes'       => 'nullable|string|max:500',
             ], [
-                'loan_code.unique' => '⚠️ This loan code is already in use.',
-                'customer_id.exists' => '⚠️ Selected customer does not exist.',
+                'loan_code.unique'    => '⚠️ This loan code is already in use.',
+                'customer_id.exists'  => '⚠️ Selected customer does not exist.',
             ]);
-
-            DB::beginTransaction();
 
             $amount = (float) $validated['amount'];
             $term   = (int) $validated['term_months'];
-            $start  = Carbon::parse($validated['start_date']);
+            $start  = Carbon::parse($validated['start_date'])->startOfDay();
+
+            /**
+             * ✅ IDEMPOTENCY GUARD
+             * If the same loan (customer, amount, term, start_date) was created
+             * in the last 2 minutes, assume this is a duplicate button click.
+             */
+            $recentExisting = Loan::where('customer_id', $validated['customer_id'])
+                ->where('amount', $amount)
+                ->where('term_months', $term)
+                ->whereDate('start_date', $start->toDateString())
+                ->where('created_at', '>=', now()->subMinutes(2))
+                ->latest('id')
+                ->first();
+
+            if ($recentExisting) {
+                return redirect()
+                    ->route($this->basePath() . '.loans.show', $recentExisting->id)
+                    ->with('success', '✅ Loan was already created recently. Duplicate submission ignored.');
+            }
+
+            DB::beginTransaction();
 
             $loan = new Loan([
                 'user_id'       => auth()->id(),
@@ -164,48 +187,56 @@ class LoanController extends Controller
                 'notes'         => $validated['notes'] ?? null,
             ]);
 
-            $loan->expected_interest = $loan->calculateExpectedInterest();
+            // Calculate interest & totals using model helpers
+            $loan->expected_interest   = $loan->calculateExpectedInterest();
             $loan->total_with_interest = $loan->calculateTotalWithInterest();
-            $loan->amount_paid = 0.00;
-            $loan->amount_remaining = $loan->total_with_interest;
-            $loan->status = 'active';
+            $loan->amount_paid         = 0.00;
+            $loan->amount_remaining    = $loan->total_with_interest;
+            $loan->status              = 'active';
             $loan->save();
 
-            // Generate monthly schedules
+            // 🔢 Generate monthly schedules safely (ensure sums match exactly)
             $monthly = round($loan->total_with_interest / $term, 2);
             $sum = 0;
+
             for ($i = 1; $i <= $term; $i++) {
+                // Last installment adjusts for rounding difference
                 $paymentAmount = ($i < $term)
                     ? $monthly
                     : round($loan->total_with_interest - $sum, 2);
+
                 $sum += $paymentAmount;
 
                 LoanSchedule::create([
-                    'loan_id' => $loan->id,
+                    'loan_id'        => $loan->id,
                     'payment_number' => $i,
-                    'amount' => $paymentAmount,
-                    'amount_paid' => 0.00,
-                    'amount_left' => $paymentAmount,
-                    'is_paid' => false,
-                    'due_date' => $start->copy()->addMonths($i),
-                    'note' => 'Pending',
+                    'amount'         => $paymentAmount,
+                    'amount_paid'    => 0.00,
+                    'amount_left'    => $paymentAmount,
+                    'is_paid'        => false,
+                    'due_date'       => $start->copy()->addMonths($i),
+                    'note'           => 'Pending',
                 ]);
             }
 
             DB::commit();
 
-            ActivityLogger::log('Created Loan', "Loan #{$loan->loan_code} created for {$loan->client_name}");
+            ActivityLogger::log(
+                'Created Loan',
+                "Loan #{$loan->loan_code} created for {$loan->client_name}"
+            );
 
-            /** ✉️📱 Send Email & SMS Notifications */
+            /** ✉️📱 Send Email & SMS Notifications (KEPT ON as requested) */
             try {
                 $customer = $loan->customer;
+
                 if ($customer) {
                     // ✉️ Email notification
                     if (!empty($customer->email)) {
                         Mail::to($customer->email)->send(new LoanCreatedMail($loan));
                         Log::info('📨 LoanCreatedMail sent', [
                             'loan_id' => $loan->id,
-                            'email' => $customer->email,
+                            'email'   => $customer->email,
                         ]);
                     }
 
@@ -220,7 +251,7 @@ class LoanController extends Controller
             } catch (\Throwable $notifyEx) {
                 Log::warning('⚠️ Loan notification failed', [
                     'loan_id' => $loan->id,
-                    'error' => $notifyEx->getMessage(),
+                    'error'   => $notifyEx->getMessage(),
                 ]);
             }
 
@@ -228,6 +259,7 @@ class LoanController extends Controller
                 ->route($this->basePath() . '.loans.show', $loan->id)
                 ->with('success', '✅ Loan created successfully and marked active.');
         } catch (\Illuminate\Validation\ValidationException $ex) {
+            // No transaction yet when validation fails, just return with errors
             return back()
                 ->withErrors($ex->validator)
                 ->withInput();
@@ -237,7 +269,10 @@ class LoanController extends Controller
         }
     }
 
-    /** 💵 Record payment — SINGLE EXECUTION (no duplicates) */
+    /**
+     * 💵 Legacy single-payment endpoint (still here if you use it anywhere)
+     * NOTE: your main payment logic is now in PaymentController with schedules.
+     */
     public function recordPayment(Request $request, Loan $loan)
     {
         $validated = $request->validate([
@@ -247,16 +282,16 @@ class LoanController extends Controller
 
         try {
             $loan->payments()->create([
-                'amount' => $validated['amount'],
-                'paid_at' => now(),
-                'received_by' => auth()->id(),
+                'amount'         => $validated['amount'],
+                'paid_at'        => now(),
+                'received_by'    => auth()->id(),
                 'payment_method' => 'cash',
-                'note' => $validated['note'] ?? null,
+                'note'           => $validated['note'] ?? null,
             ]);
 
             // Update totals
             $loan->refresh();
-            $loan->amount_paid = $loan->payments->sum('amount');
+            $loan->amount_paid      = $loan->payments->sum('amount');
             $loan->amount_remaining = max(0, $loan->total_with_interest - $loan->amount_paid);
 
             // Check completion
@@ -264,18 +299,22 @@ class LoanController extends Controller
                 $loan->status = 'paid';
                 $loan->save();
 
-                ActivityLogger::log('Loan Completed', "Loan #{$loan->loan_code} fully repaid by {$loan->client_name}");
+                ActivityLogger::log(
+                    'Loan Completed',
+                    "Loan #{$loan->loan_code} fully repaid by {$loan->client_name}"
+                );
 
-                /** ✉️📱 Send completion notifications */
+                /** ✉️📱 Completion notifications */
                 try {
                     $customer = $loan->customer;
+
                     if ($customer) {
                         // Email
                         if (!empty($customer->email)) {
                             Mail::to($customer->email)->send(new LoanCompletedMail($loan));
                             Log::info('📨 LoanCompletedMail sent', [
                                 'loan_id' => $loan->id,
-                                'email' => $customer->email,
+                                'email'   => $customer->email,
                             ]);
                         }
 
@@ -288,21 +327,26 @@ class LoanController extends Controller
                 } catch (\Throwable $ex) {
                     Log::warning('⚠️ Loan completion notification failed', [
                         'loan_id' => $loan->id,
-                        'error' => $ex->getMessage(),
+                        'error'   => $ex->getMessage(),
                     ]);
                 }
             } else {
                 $loan->save();
-                ActivityLogger::log('Recorded Payment', "₵{$validated['amount']} received for Loan #{$loan->loan_code}");
+
+                ActivityLogger::log(
+                    'Recorded Payment',
+                    "₵{$validated['amount']} received for Loan #{$loan->loan_code}"
+                );
             }
 
             return back()->with('success', '✅ Payment recorded successfully.');
         } catch (\Throwable $e) {
             Log::error('❌ Payment record failed', [
                 'loan_id' => $loan->id ?? 'unknown',
-                'error' => $e->getMessage(),
-                'line' => $e->getLine(),
+                'error'   => $e->getMessage(),
+                'line'    => $e->getLine(),
             ]);
+
             return back()->with('error', '⚠️ Failed to record payment.');
         }
     }
@@ -312,17 +356,24 @@ class LoanController extends Controller
     {
         try {
             $loan->load([
-                'customer', 'user',
+                'customer',
+                'user',
                 'payments.receivedByUser',
-                'loanSchedules' => fn($q) => $q->orderBy('payment_number')
+                'loanSchedules' => fn($q) => $q->orderBy('payment_number'),
             ]);
 
-            $loan->amount_paid = $loan->payments->sum('amount');
+            // Re-sync amount_paid & amount_remaining from schedules
+            $loan->amount_paid      = $loan->payments->sum('amount');
             $loan->amount_remaining = $loan->loanSchedules->sum('amount_left');
 
             return Inertia::render('Admin/Loans/Show', [
-                'loan' => $loan->fresh(['customer', 'user', 'payments.receivedByUser', 'loanSchedules']),
-                'auth' => ['user' => auth()->user()],
+                'loan' => $loan->fresh([
+                    'customer',
+                    'user',
+                    'payments.receivedByUser',
+                    'loanSchedules',
+                ]),
+                'auth'     => ['user' => auth()->user()],
                 'basePath' => $this->basePath(),
             ]);
         } catch (\Throwable $e) {
@@ -336,11 +387,12 @@ class LoanController extends Controller
         Log::error('❌ LoanController Error', [
             'route' => request()->path(),
             'error' => $e->getMessage(),
-            'line' => $e->getLine(),
-            'file' => $e->getFile(),
+            'line'  => $e->getLine(),
+            'file'  => $e->getFile(),
         ]);
 
-        return redirect()->route($this->basePath() . '.loans.index')
+        return redirect()
+            ->route($this->basePath() . '.loans.index')
             ->with('error', $msg);
     }
 }

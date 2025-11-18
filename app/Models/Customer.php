@@ -44,7 +44,7 @@ class Customer extends Authenticatable
         'loan_purpose',
         'notes',
 
-        // Summary
+        // Summary fields
         'total_loans',
         'total_paid',
         'total_remaining',
@@ -61,7 +61,9 @@ class Customer extends Authenticatable
         'email_verified_at' => 'datetime',
     ];
 
-    /* Auto-hash password */
+    /**
+     * Automatically hash password if not already hashed.
+     */
     public function setPasswordAttribute($value)
     {
         if (!empty($value) && !str_starts_with($value, '$2y$')) {
@@ -71,7 +73,9 @@ class Customer extends Authenticatable
         }
     }
 
-    /* Relationships */
+    /**
+     * Relationships
+     */
     public function loans()
     {
         return $this->hasMany(Loan::class);
@@ -87,80 +91,71 @@ class Customer extends Authenticatable
         return $this->hasMany(\App\Models\Guarantor::class);
     }
 
-    /* Summary Helpers */
-    public function calculateTotalLoans(): float
-    {
-        return round($this->loans()->sum('amount'), 2);
-    }
-
-    public function calculateTotalPaid(): float
-    {
-        return round($this->loans()->sum('amount_paid'), 2);
-    }
-
-    public function calculateTotalRemaining(): float
-    {
-        return round($this->loans()->sum('amount_remaining'), 2);
-    }
-
-    public function calculateActiveLoansCount(): int
-    {
-        return $this->loans()
-            ->whereIn('status', ['active', 'overdue', 'pending'])
-            ->count();
-    }
-
-    public function calculateLastLoanDate()
-    {
-        return $this->loans()
-            ->orderByDesc('created_at')
-            ->value('created_at');
-    }
-
-    /* Refresh Loan Summary */
-    public static function refreshLoanSummary(Customer $customer): void
+    /**
+     * ============================
+     * 🔥 Loan Summary Refresher
+     * ============================
+     */
+    public function refreshLoanSummary()
     {
         try {
-            $customer->total_loans = $customer->calculateTotalLoans();
-            $customer->total_paid = $customer->calculateTotalPaid();
-            $customer->total_remaining = $customer->calculateTotalRemaining();
-            $customer->active_loans_count = $customer->calculateActiveLoansCount();
-            $customer->last_loan_date = $customer->calculateLastLoanDate();
-            $customer->saveQuietly();
+            $loans = $this->loans()->get();
+
+            $this->total_loans = $loans->count();
+            $this->active_loans_count = $loans->where('status', 'active')->count();
+            $this->total_paid = $this->payments()->sum('amount');
+            $this->total_remaining = $loans->sum('remaining_balance');
+            $this->last_loan_date = $loans->max('created_at');
+
+            $this->saveQuietly();
+
+            Log::info("Customer loan summary refreshed", [
+                'customer_id' => $this->id,
+            ]);
 
         } catch (\Throwable $e) {
-            Log::error('Failed to refresh customer summary', [
-                'customer_id' => $customer->id,
+            Log::error("refreshLoanSummary failed", [
+                'customer_id' => $this->id,
                 'error' => $e->getMessage(),
             ]);
         }
     }
 
-    /* ============================
-       🔥 PERMANENT DELETE METHOD
-       ============================ */
+    /**
+     * ============================
+     * 🔥 PERMANENT DELETE METHOD
+     * ============================
+     */
     public function forceDeleteFully()
     {
         try {
             // Delete guarantors
             $this->guarantors()->delete();
 
-            // Delete payments (via loans)
-            foreach ($this->loans as $loan) {
+            // Delete loans and dependent data
+            foreach ($this->loans()->withTrashed()->get() as $loan) {
+
+                if (method_exists($loan, 'loanSchedules')) {
+                    $loan->loanSchedules()->delete();
+                    $loan->loanSchedules()->forceDelete();
+                }
+
                 $loan->payments()->delete();
-                $loan->delete();
+                $loan->forceDelete();
             }
 
-            // Delete the customer permanently
-            parent::delete();
+            // Finally remove customer
+            $this->forceDelete();
 
             return true;
 
         } catch (\Throwable $e) {
+
             Log::error('Force delete failed', [
                 'customer_id' => $this->id,
                 'error' => $e->getMessage(),
             ]);
+
             return false;
         }
     }

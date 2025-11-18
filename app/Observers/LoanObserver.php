@@ -13,24 +13,31 @@ class LoanObserver
     public function created(Loan $loan): void
     {
         try {
-            // Auto-calculate expected interest & totals
-            $loan->expected_interest = $loan->calculateExpectedInterest();
-            $loan->total_with_interest = $loan->calculateTotalWithInterest();
+            // Auto-calculate expected interest & totals (if your model supports this)
+            if (method_exists($loan, 'calculateExpectedInterest')) {
+                $loan->expected_interest = $loan->calculateExpectedInterest();
+            }
+
+            if (method_exists($loan, 'calculateTotalWithInterest')) {
+                $loan->total_with_interest = $loan->calculateTotalWithInterest();
+            }
+
             $loan->status = $loan->status ?? 'active';
             $loan->saveQuietly();
 
             // Update related customer
-            if ($loan->customer) {
-                $loan->customer->refreshLoanSummary($loan->customer);
+            if ($loan->customer && method_exists($loan->customer, 'refreshLoanSummary')) {
+                $loan->customer->refreshLoanSummary();
             }
 
             Log::info('✅ Loan created and recalculated', [
                 'loan_id' => $loan->id,
-                'client' => $loan->client_name,
+                'client'  => $loan->client_name,
             ]);
         } catch (\Throwable $e) {
             Log::error('❌ LoanObserver (created) failed', [
-                'error' => $e->getMessage(),
+                'loan_id' => $loan->id ?? null,
+                'error'   => $e->getMessage(),
             ]);
         }
     }
@@ -41,16 +48,22 @@ class LoanObserver
     public function updated(Loan $loan): void
     {
         try {
-            $loan->recalculateSummary();
-
-            if ($loan->customer) {
-                $loan->customer->refreshLoanSummary($loan->customer);
+            // If your Loan model has its own summarizer, use it
+            if (method_exists($loan, 'recalculateSummary')) {
+                $loan->recalculateSummary();
             }
 
-            Log::info('🔁 Loan updated and recalculated', ['loan_id' => $loan->id]);
+            if ($loan->customer && method_exists($loan->customer, 'refreshLoanSummary')) {
+                $loan->customer->refreshLoanSummary();
+            }
+
+            Log::info('🔁 Loan updated and recalculated', [
+                'loan_id' => $loan->id,
+            ]);
         } catch (\Throwable $e) {
             Log::error('❌ LoanObserver (updated) failed', [
-                'error' => $e->getMessage(),
+                'loan_id' => $loan->id ?? null,
+                'error'   => $e->getMessage(),
             ]);
         }
     }
@@ -61,14 +74,18 @@ class LoanObserver
     public function deleted(Loan $loan): void
     {
         try {
-            if ($loan->customer) {
-                $loan->customer->refreshLoanSummary($loan->customer);
+            if ($loan->customer && method_exists($loan->customer, 'refreshLoanSummary')) {
+                $loan->customer->refreshLoanSummary();
             }
 
-            Log::info('🗑️ Loan deleted', ['loan_id' => $loan->id]);
+            Log::info('🗑️ Loan deleted', [
+                'loan_id'     => $loan->id,
+                'customer_id' => $loan->customer_id,
+            ]);
         } catch (\Throwable $e) {
             Log::error('❌ LoanObserver (deleted) failed', [
-                'error' => $e->getMessage(),
+                'loan_id' => $loan->id ?? null,
+                'error'   => $e->getMessage(),
             ]);
         }
     }

@@ -1,6 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, router, usePage } from "@inertiajs/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 export default function LoansIndex() {
     const {
@@ -13,18 +13,24 @@ export default function LoansIndex() {
     } = usePage().props;
 
     const user = auth?.user || {};
+
     const [clientSearch, setClientSearch] = useState(filters.client || "");
     const [status, setStatus] = useState(filters.status || "");
 
-    /* 🎉 Global toast flashes */
+    /* ============================================
+       FLASH TOAST MESSAGES
+    ============================================ */
     useEffect(() => {
         if (flash?.success) window.toast?.success?.(flash.success);
         if (flash?.error) window.toast?.error?.(flash.error);
     }, [flash]);
 
-    /* 🔍 Debounced search + filter */
+    /* ============================================
+       DEBOUNCED FILTER + SEARCH
+       (Stable: avoids double-loading + infinite loop)
+    ============================================ */
     useEffect(() => {
-        const delay = setTimeout(() => {
+        const timer = setTimeout(() => {
             router.get(
                 route(`${basePath}.loans.index`),
                 {
@@ -33,14 +39,15 @@ export default function LoansIndex() {
                 },
                 { preserveState: true, replace: true },
             );
-        }, 400);
-        return () => clearTimeout(delay);
+        }, 350);
+
+        return () => clearTimeout(timer);
     }, [clientSearch, status]);
 
-    /* 💰 Money formatter */
+    /* ============================================
+       HELPERS
+    ============================================ */
     const money = (n) => `₵${Number(n ?? 0).toFixed(2)}`;
-
-    /* 📅 Date formatter */
     const formatDate = (date) =>
         date
             ? new Date(date).toLocaleDateString("en-US", {
@@ -50,18 +57,21 @@ export default function LoansIndex() {
               })
             : "—";
 
-    /* ⚙️ Compute loan status */
-    const getStatus = (loan) => {
-        const remaining = parseFloat(loan.amount_remaining ?? 0);
+    /* ============================================
+       STATUS LOGIC — Backend first, fallback to computed
+    ============================================ */
+    const computeLoanStatus = (loan) => {
+        if (loan.status) return loan.status; // backend always correct
+
+        const remaining = Number(loan.amount_remaining || 0);
         const due = new Date(loan.due_date);
         const now = new Date();
 
         if (remaining <= 0) return "paid";
-        if (loan.due_date && now > due && remaining > 0) return "overdue";
+        if (due && now > due && remaining > 0) return "overdue";
         return "active";
     };
 
-    /* 🎨 Badge color */
     const badge = (status) => {
         switch (status) {
             case "active":
@@ -77,13 +87,21 @@ export default function LoansIndex() {
         }
     };
 
-    const canManage =
-        ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
-        user?.is_super_admin;
+    /* ============================================
+       ROLE PERMISSIONS
+    ============================================ */
+    const canManage = useMemo(
+        () =>
+            ["admin", "staff", "officer", "superadmin"].includes(user?.role) ||
+            user?.is_super_admin,
+        [user],
+    );
 
-    /* 🧾 Card Component */
+    /* ============================================
+       SMALL UI CARD COMPONENT
+    ============================================ */
     const Card = ({ title, sub, count = 0, sum = 0, onView }) => (
-        <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-transform duration-200 w-64 p-5 flex flex-col gap-2 border border-gray-100">
+        <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition w-64 p-5 flex flex-col gap-2 border">
             <div className="text-sm font-medium text-gray-500">{title}</div>
             <div className="text-2xl font-bold text-gray-800">{count}</div>
             <div className="text-sm text-gray-600">
@@ -108,9 +126,9 @@ export default function LoansIndex() {
         >
             <Head title="All Loans" />
 
-            <div className="py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-                {/* 💠 Summary Cards */}
-                <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide">
+            <div className="py-8 max-w-7xl mx-auto px-4 space-y-8">
+                {/* SUMMARY CARDS */}
+                <div className="flex overflow-x-auto gap-6 pb-4">
                     <div className="flex flex-nowrap space-x-6 min-w-max">
                         <Card
                             title="Active Loans"
@@ -143,13 +161,13 @@ export default function LoansIndex() {
                     </div>
                 </div>
 
-                {/* 🔍 Filters */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                {/* FILTERS */}
+                <div className="flex flex-col md:flex-row justify-between gap-4">
                     <div className="flex items-center gap-3 flex-wrap">
                         <select
                             value={status}
                             onChange={(e) => setStatus(e.target.value)}
-                            className="border border-gray-300 rounded-md px-3 py-2 text-sm bg-white text-gray-800"
+                            className="border rounded px-3 py-2 text-sm"
                         >
                             <option value="">All statuses</option>
                             <option value="active">Active</option>
@@ -162,7 +180,7 @@ export default function LoansIndex() {
                             placeholder="Search by client name..."
                             value={clientSearch}
                             onChange={(e) => setClientSearch(e.target.value)}
-                            className="border border-gray-300 rounded-md px-3 py-2 text-sm w-full md:w-64 bg-white text-gray-800"
+                            className="border rounded px-3 py-2 text-sm w-full md:w-64"
                         />
 
                         {(status || clientSearch) && (
@@ -176,7 +194,7 @@ export default function LoansIndex() {
                                         { replace: true },
                                     );
                                 }}
-                                className="px-4 py-2 text-sm font-semibold rounded-md bg-gray-800 text-white hover:bg-black transition shadow"
+                                className="px-4 py-2 text-sm bg-gray-800 text-white rounded hover:bg-black transition"
                             >
                                 Clear
                             </button>
@@ -186,15 +204,15 @@ export default function LoansIndex() {
                     {canManage && (
                         <Link
                             href={route(`${basePath}.customers.index`)}
-                            className="px-4 py-2 bg-green-600 text-white rounded font-semibold hover:bg-green-700 shadow transition"
+                            className="px-4 py-2 bg-green-600 text-white rounded font-semibold hover:bg-green-700 transition"
                         >
                             + New Loan (Select Customer)
                         </Link>
                     )}
                 </div>
 
-                {/* 📋 Loans Table */}
-                <div className="overflow-x-auto bg-white rounded-lg shadow border border-gray-200">
+                {/* LOANS TABLE */}
+                <div className="overflow-x-auto bg-white rounded-lg shadow border">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-100">
                             <tr>
@@ -222,12 +240,14 @@ export default function LoansIndex() {
                         <tbody className="divide-y divide-gray-200">
                             {loans.length ? (
                                 loans.map((loan) => {
-                                    const computedStatus = getStatus(loan);
+                                    const derivedStatus =
+                                        computeLoanStatus(loan);
+
                                     return (
                                         <tr
                                             key={loan.id}
-                                            className={`hover:bg-gray-100 transition-colors ${
-                                                computedStatus === "overdue"
+                                            className={`hover:bg-gray-100 transition ${
+                                                derivedStatus === "overdue"
                                                     ? "bg-red-50"
                                                     : ""
                                             }`}
@@ -256,12 +276,13 @@ export default function LoansIndex() {
                                             <td className="px-4 py-3 text-sm">
                                                 <span
                                                     className={`px-2 py-1 rounded-full text-xs font-semibold ${badge(
-                                                        computedStatus,
+                                                        derivedStatus,
                                                     )}`}
                                                 >
-                                                    {computedStatus.toUpperCase()}
+                                                    {derivedStatus.toUpperCase()}
                                                 </span>
                                             </td>
+
                                             <td className="px-4 py-3 text-sm">
                                                 <Link
                                                     href={route(

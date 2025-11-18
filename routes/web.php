@@ -28,7 +28,7 @@ use App\Http\Controllers\Superadmin\ActivityController as SuperadminActivityCont
 
 
 // --------------------------------------------------
-// HOME -> LOGIN
+// ROOT → LOGIN
 // --------------------------------------------------
 Route::get('/', fn () => redirect()->route('login'));
 
@@ -42,10 +42,9 @@ Route::get('/dashboard', [DashboardController::class, 'redirect'])
 
 
 // --------------------------------------------------
-// AUTH ROUTES
+// AUTH
 // --------------------------------------------------
 Route::middleware('guest')->group(function () {
-
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
 
@@ -57,9 +56,9 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->name('logout');
 
 
-// --------------------------------------------------
-// SUPERADMIN ROUTES
-// --------------------------------------------------
+// ======================================================================
+//                           SUPERADMIN ROUTES
+// ======================================================================
 Route::prefix('superadmin')
     ->middleware(['auth', 'verified'])
     ->as('superadmin.')
@@ -69,19 +68,18 @@ Route::prefix('superadmin')
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/dashboard/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
         Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('dashboard.loansByYear');
-
-        // EXPECTED INTEREST PAGE
-        Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])
-            ->name('dashboard.expectedInterest');
+        Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])->name('dashboard.expectedInterest');
 
         // SETTINGS
-        Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings.index');
+        Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings');
         Route::put('/settings/update', [AdminSettingsController::class, 'update'])->name('settings.update');
         Route::put('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
 
         // USERS
-        Route::resource('users', SuperadminUserController::class);
-        Route::resource('manage-customers', ManageCustomersController::class);
+        Route::resource('users', SuperadminUserController::class)->only(['index', 'show']);
+
+        // MANAGE CUSTOMERS
+        Route::resource('manage-customers', ManageCustomersController::class)->only(['index', 'show']);
 
         // SYSTEM
         Route::get('/system', [SystemController::class, 'index'])->name('system.index');
@@ -92,21 +90,35 @@ Route::prefix('superadmin')
         Route::post('/system/recalculate-loans', [SystemController::class, 'recalculateLoans']);
         Route::post('/system/reset', [SystemController::class, 'reset']);
 
-        // READ-ONLY MODULES
+        // CUSTOMERS
         Route::resource('customers', SuperadminCustomerController::class)->only(['index', 'show']);
-        Route::resource('loans', AdminLoanController::class)->only(['index', 'show']);
-        Route::resource('reports', AdminReportsController::class)->only(['index', 'show']);
-        Route::resource('payments', AdminPaymentController::class)->only(['index', 'show']);
 
-        // ACTIVITY
+        // LOANS
+        Route::resource('loans', AdminLoanController::class)->only(['index', 'show']);
+
+        // REPORTS
+        Route::resource('reports', AdminReportsController::class)->only(['index', 'show']);
+
+        // SUPERADMIN CAN RECORD PAYMENTS
+        Route::post('payments', [AdminPaymentController::class, 'store'])
+            ->name('payments.store');
+
+        // SUPERADMIN VIEW PAYMENTS
+        Route::resource('payments', AdminPaymentController::class)
+            ->only(['index', 'show'])
+            ->names([
+                'index' => 'payments.index',
+                'show'  => 'payments.show',
+            ]);
+
+        // ACTIVITY LOGS
         Route::get('/activity', [SuperadminActivityController::class, 'index'])->name('activity.index');
-        Route::post('/activity/clear', [SuperadminActivityController::class, 'clear'])->name('activity.clear');
     });
 
 
-// --------------------------------------------------
-// ADMIN ROUTES
-// --------------------------------------------------
+// ======================================================================
+//                              ADMIN ROUTES
+// ======================================================================
 Route::prefix('admin')
     ->middleware(['auth', 'verified'])
     ->as('admin.')
@@ -118,49 +130,50 @@ Route::prefix('admin')
         Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('dashboard.loansByYear');
         Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])->name('dashboard.expectedInterest');
 
-        // ============================
         // CUSTOMERS
-        // ============================
         Route::resource('customers', AdminCustomerController::class);
 
-        // 🔥 NEW — Suspend / Reactivate Customer
+        // CUSTOMER SUSPEND
         Route::post('/customers/{customer}/toggle-suspend',
-            [AdminCustomerController::class, 'toggleSuspend']
-        )->name('customers.toggleSuspend');
+            [AdminCustomerController::class, 'toggleSuspend'])
+            ->name('customers.toggleSuspend');
 
-        // ============================
         // LOANS
-        // ============================
         Route::resource('loans', AdminLoanController::class);
-        Route::post('/loans/{loan}/record-payment', [AdminLoanController::class, 'recordPayment']);
 
-        // ============================
+        // Legacy: record-payment route inside loan controller
+        Route::post('/loans/{loan}/record-payment', [AdminLoanController::class, 'recordPayment'])
+            ->name('loans.recordPayment');
+
         // REPORTS
-        // ============================
         Route::resource('reports', AdminReportsController::class)->only(['index', 'show']);
         Route::post('/reports/{id}/send-agreement', [AdminReportsController::class, 'sendAgreement'])
             ->name('reports.sendAgreement');
         Route::post('/reports/clear-failures', [AdminReportsController::class, 'clearEmailFailures'])
             ->name('reports.clearEmailFailures');
 
-        // ============================
-        // PAYMENTS
-        // ============================
-        Route::resource('payments', AdminPaymentController::class)->only(['index', 'show']);
+        // ADMIN CANNOT RECORD PAYMENTS
+        // Only view:
+        Route::resource('payments', AdminPaymentController::class)
+            ->only(['index', 'show'])
+            ->names([
+                'index' => 'payments.index',
+                'show'  => 'payments.show',
+            ]);
 
         // SETTINGS
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings');
-        Route::put('/settings/update', [AdminSettingsController::class, 'update']);
-        Route::put('/settings/reset', [AdminSettingsController::class, 'reset']);
+        Route::put('/settings/update', [AdminSettingsController::class, 'update'])->name('settings.update');
+        Route::put('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
 
-        // ACTIVITY
+        // ACTIVITY LOGS (view only)
         Route::get('/activity', [SuperadminActivityController::class, 'index'])->name('activity.index');
     });
 
 
-// --------------------------------------------------
+// ======================================================================
 // PROFILE
-// --------------------------------------------------
+// ======================================================================
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
@@ -168,9 +181,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 });
 
 
-// --------------------------------------------------
-// FALLBACK 404
-// --------------------------------------------------
+// ======================================================================
+// 404
+// ======================================================================
 Route::fallback(fn () =>
     Inertia::render('Errors/404', [
         'title' => 'Not Found',

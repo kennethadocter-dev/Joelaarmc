@@ -1,8 +1,6 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, Link, useForm, usePage, router } from "@inertiajs/react";
+import { Head, Link, useForm, usePage } from "@inertiajs/react";
 import { useEffect, useState } from "react";
-import { toast, Toaster } from "react-hot-toast";
-import { route } from "ziggy-js";
 
 export default function LoanCreate() {
     const {
@@ -13,11 +11,13 @@ export default function LoanCreate() {
         flash = {},
     } = usePage().props;
 
+    /* ----------------------------------------------
+       PREFILL FROM URL OR FLASH
+    ---------------------------------------------- */
     const urlParams = new URLSearchParams(window.location.search);
     const queryCustomerId = urlParams.get("customer_id");
     const queryAmount = urlParams.get("requested_amount");
     const queryClientName = urlParams.get("client_name");
-
     const flashCustomer = flash?.customer || {};
 
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -34,11 +34,14 @@ export default function LoanCreate() {
             flashCustomer.loan_amount_requested ||
             "",
         term_months: "",
-        interest_rate: 20, // ✅ Default 20%
+        interest_rate: 20,
         start_date: new Date().toISOString().slice(0, 10),
         notes: "",
     });
 
+    /* ----------------------------------------------
+       STATE FOR SCHEDULE + SUMMARY
+    ---------------------------------------------- */
     const [schedule, setSchedule] = useState([]);
     const [summary, setSummary] = useState({
         totalPayment: 0,
@@ -46,7 +49,9 @@ export default function LoanCreate() {
         totalInterest: 0,
     });
 
-    // 💰 Real repayment logic based on ₵200 base loan
+    /* ----------------------------------------------
+       BASE REPAYMENT RULES
+    ---------------------------------------------- */
     const baseRates = {
         1: 240,
         2: 131 * 2,
@@ -56,12 +61,14 @@ export default function LoanCreate() {
         6: 61 * 6,
     };
 
-    // 🧮 Auto calculate schedule and summary
+    /* ----------------------------------------------
+       AUTO-CALCULATE SCHEDULE
+    ---------------------------------------------- */
     useEffect(() => {
         const amount = parseFloat(data.amount) || 0;
         const months = parseInt(data.term_months) || 0;
 
-        if (amount > 0 && months > 0) {
+        if (amount > 0 && months > 0 && baseRates[months]) {
             const scale = amount / 200;
             const totalPayment = baseRates[months] * scale;
             const monthlyPayment = totalPayment / months;
@@ -96,28 +103,29 @@ export default function LoanCreate() {
         }
     }, [data.amount, data.term_months, data.start_date]);
 
-    // 🧾 Submit
+    /* ----------------------------------------------
+       SUBMIT (REDIRECT HANDLED BY BACKEND)
+    ---------------------------------------------- */
     const handleSubmit = (e) => {
         e.preventDefault();
+        if (processing) return;
 
         post(route(`${basePath}.loans.store`), {
+            preserveScroll: true,
             onSuccess: () => {
-                toast.success("✅ Loan created successfully!", {
-                    duration: 2000,
-                });
-                setTimeout(() => {
-                    router.visit(route(`${basePath}.loans.index`));
-                }, 1500);
+                window.toast?.success("Loan created successfully!");
                 reset();
+                // Backend handles redirect to loans.show
             },
             onError: (errs) => {
-                const first =
+                const firstError =
                     errs && Object.values(errs)?.[0]
                         ? Array.isArray(Object.values(errs)[0])
                             ? Object.values(errs)[0][0]
                             : Object.values(errs)[0]
-                        : "⚠️ Please check highlighted fields.";
-                toast.error(first, { duration: 3000 });
+                        : "Please check highlighted fields.";
+
+                window.toast?.error(firstError);
             },
         });
     };
@@ -131,25 +139,24 @@ export default function LoanCreate() {
             }
         >
             <Head title="Create Loan" />
-            <Toaster position="top-right" />
 
             <div className="max-w-5xl mx-auto py-8 px-4 space-y-8">
-                {/* 🔙 Back */}
+                {/* BACK BUTTON */}
                 <div className="flex justify-start mb-4">
                     <Link
                         href={route(`${basePath}.loans.index`)}
-                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg border"
+                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 
+                                   text-gray-700 rounded-lg border"
                     >
                         ← Back
                     </Link>
                 </div>
 
-                {/* 🧾 Loan Form */}
+                {/* FORM */}
                 <form
                     onSubmit={handleSubmit}
                     className="space-y-6 bg-white p-6 rounded-lg shadow"
                 >
-                    {/* BASIC DETAILS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field
                             label="Client Name *"
@@ -157,6 +164,7 @@ export default function LoanCreate() {
                             onChange={(v) => setData("client_name", v)}
                             required
                         />
+
                         <Field
                             label="Loan Amount (₵)"
                             type="number"
@@ -164,8 +172,10 @@ export default function LoanCreate() {
                             onChange={(v) => setData("amount", v)}
                             required
                         />
+
+                        {/* TERM */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">
+                            <label className="block text-sm text-gray-700">
                                 Term (Months){" "}
                                 <span className="text-red-500">*</span>
                             </label>
@@ -186,7 +196,7 @@ export default function LoanCreate() {
                             </select>
                         </div>
 
-                        {/* ✅ New Interest Rate Field */}
+                        {/* INTEREST RATE */}
                         <Field
                             label="Interest Rate (%)"
                             type="number"
@@ -194,6 +204,8 @@ export default function LoanCreate() {
                             onChange={(v) => setData("interest_rate", v)}
                             required
                         />
+
+                        {/* START DATE */}
                         <Field
                             label="Start Date"
                             type="date"
@@ -212,15 +224,16 @@ export default function LoanCreate() {
                             value={data.notes}
                             onChange={(e) => setData("notes", e.target.value)}
                             placeholder="Optional remarks..."
-                        ></textarea>
+                        />
                     </div>
 
-                    {/* 🌟 Summary */}
+                    {/* SUMMARY */}
                     {schedule.length > 0 && (
                         <div className="bg-gray-50 border rounded-lg p-5 shadow-sm">
                             <h3 className="font-semibold text-gray-700 mb-4 text-lg">
                                 Loan Summary
                             </h3>
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
                                 <SummaryBox
                                     icon="📅"
@@ -258,9 +271,7 @@ export default function LoanCreate() {
                             <table className="min-w-full text-sm">
                                 <thead className="bg-gray-100">
                                     <tr>
-                                        <th className="px-4 py-2 text-left">
-                                            #
-                                        </th>
+                                        <th className="px-4 py-2">#</th>
                                         <th className="px-4 py-2 text-left">
                                             Due Date
                                         </th>
@@ -269,6 +280,7 @@ export default function LoanCreate() {
                                         </th>
                                     </tr>
                                 </thead>
+
                                 <tbody>
                                     {schedule.map((item) => (
                                         <tr key={item.num} className="border-t">
@@ -292,14 +304,17 @@ export default function LoanCreate() {
                     <div className="flex justify-between pt-4 border-t">
                         <Link
                             href={route(`${basePath}.loans.index`)}
-                            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg border"
+                            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 
+                                       text-gray-700 rounded-lg border"
                         >
                             ← Back
                         </Link>
+
                         <button
                             type="submit"
                             disabled={processing}
-                            className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition"
+                            className="px-6 py-2 bg-blue-600 text-white rounded 
+                                       hover:bg-blue-700 disabled:opacity-50"
                         >
                             {processing ? "Saving..." : "Save Loan"}
                         </button>
@@ -322,7 +337,9 @@ export default function LoanCreate() {
     );
 }
 
-/* 🔹 Reusable input field */
+/* ----------------------------------------------
+   REUSABLE FIELD COMPONENT
+---------------------------------------------- */
 function Field({ label, type = "text", value, onChange, required }) {
     return (
         <div>
@@ -340,7 +357,9 @@ function Field({ label, type = "text", value, onChange, required }) {
     );
 }
 
-/* 💎 Reusable summary box */
+/* ----------------------------------------------
+   SUMMARY BOX
+---------------------------------------------- */
 function SummaryBox({ icon, label, value, highlight = false }) {
     return (
         <div

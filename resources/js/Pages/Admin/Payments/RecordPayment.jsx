@@ -1,6 +1,7 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, usePage, Link, router } from "@inertiajs/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import toast, { Toaster } from "react-hot-toast";
 
 export default function RecordPayment() {
     const {
@@ -19,34 +20,46 @@ export default function RecordPayment() {
         redirect: redirect || route(`${basePath}.loans.show`, loan?.id),
     });
 
-    /* ✅ Flash messages on load */
+    const [locked, setLocked] = useState(false);
+
+    /* 🔔 Flash messages */
     useEffect(() => {
-        if (flash?.success) window.toast?.success?.(flash.success);
-        if (flash?.error) window.toast?.error?.(flash.error);
+        if (flash?.success) toast.success(flash.success);
+        if (flash?.error) toast.error(flash.error);
     }, [flash]);
 
-    /* 💾 Submit payment */
+    /* 💾 Submit payment (Clean, no timeout, fully reactive) */
     const submit = (e) => {
         e.preventDefault();
-        if (processing) return;
+
+        if (locked || processing) return;
+        setLocked(true);
 
         post(route(`${basePath}.payments.store`), {
             preserveScroll: true,
+
             onSuccess: () => {
-                window.toast?.success?.(
-                    "✅ Cash payment recorded successfully!",
-                );
-                reset("note", "amount");
-                setTimeout(() => {
-                    router.visit(data.redirect);
-                }, 1000);
+                toast.success("✅ Cash payment recorded successfully!");
+
+                // FRONTEND → redirect to loan details (always reloads fresh data)
+                router.visit(data.redirect, {
+                    replace: true,
+                    preserveScroll: true,
+                });
+
+                reset();
             },
+
             onError: (err) => {
                 const firstError =
                     err && Object.keys(err).length
                         ? Object.values(err)[0]
-                        : "⚠️ Failed to record payment. Please try again.";
-                window.toast?.error?.(firstError);
+                        : "⚠️ Failed to record payment.";
+                toast.error(firstError);
+            },
+
+            onFinish: () => {
+                setLocked(false);
             },
         });
     };
@@ -60,9 +73,10 @@ export default function RecordPayment() {
             }
         >
             <Head title="Record Cash Payment" />
+            <Toaster position="top-right" />
 
             <div className="max-w-2xl mx-auto bg-white shadow-md rounded-lg p-6 space-y-6 border border-gray-100 mt-6">
-                {/* 🡨 Back link */}
+                {/* 🡨 Back */}
                 <div>
                     <Link
                         href={data.redirect}
@@ -126,28 +140,25 @@ export default function RecordPayment() {
                             rows="3"
                             value={data.note}
                             onChange={(e) => setData("note", e.target.value)}
-                            placeholder="Add any note about this payment..."
+                            placeholder="Add any note..."
                             className="w-full mt-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
                         />
-                        {errors.note && (
-                            <p className="text-red-500 text-sm mt-1">
-                                {errors.note}
-                            </p>
-                        )}
                     </div>
 
                     {/* Submit */}
                     <div className="flex justify-end pt-3">
                         <button
                             type="submit"
-                            disabled={processing}
+                            disabled={processing || locked}
                             className={`${
-                                processing
+                                processing || locked
                                     ? "bg-gray-400 cursor-not-allowed"
                                     : "bg-green-600 hover:bg-green-700"
                             } text-white px-6 py-2 rounded-md text-sm font-semibold transition`}
                         >
-                            {processing ? "Recording..." : "Record Payment"}
+                            {processing || locked
+                                ? "Recording..."
+                                : "Record Payment"}
                         </button>
                     </div>
                 </form>

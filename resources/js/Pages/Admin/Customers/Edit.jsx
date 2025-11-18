@@ -1,84 +1,98 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, useForm, Link, usePage } from "@inertiajs/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function Edit() {
     const { customer = {}, basePath = "admin", flash = {} } = usePage().props;
-    const [toast, setToast] = useState(flash.success || null);
-    const [toastColor, setToastColor] = useState("bg-green-600");
 
+    // REPLACE YOUR CUSTOM TOAST WITH GLOBAL REACT-HOT-TOAST
+    useEffect(() => {
+        if (flash?.success) window.toast?.success(flash.success);
+        if (flash?.error) window.toast?.error(flash.error);
+    }, [flash]);
+
+    /** -----------------------------------------
+     *  SAFE INITIAL DATA
+     * ----------------------------------------- */
     const { data, setData, put, processing, errors } = useForm({
-        full_name: customer.full_name || "",
-        phone: customer.phone || "",
-        email: customer.email || "",
-        marital_status: customer.marital_status || "",
-        gender: customer.gender || "",
-        house_no: customer.house_no || "",
-        address: customer.address || "",
-        community: customer.community || "",
-        location: customer.location || "",
-        district: customer.district || "",
-        postal_address: customer.postal_address || "",
-        workplace: customer.workplace || "",
-        profession: customer.profession || "",
-        employer: customer.employer || "",
-        bank: customer.bank || "",
-        bank_branch: customer.bank_branch || "",
+        full_name: customer.full_name ?? "",
+        phone: customer.phone ?? "",
+        email: customer.email ?? "",
+        marital_status: customer.marital_status ?? "",
+        gender: customer.gender ?? "",
+        house_no: customer.house_no ?? "",
+        address: customer.address ?? "",
+        community: customer.community ?? "",
+        location: customer.location ?? "",
+        district: customer.district ?? "",
+        postal_address: customer.postal_address ?? "",
+        workplace: customer.workplace ?? "",
+        profession: customer.profession ?? "",
+        employer: customer.employer ?? "",
+        bank: customer.bank ?? "",
+        bank_branch: customer.bank_branch ?? "",
         has_bank_loan: !!customer.has_bank_loan,
-        bank_monthly_deduction: customer.bank_monthly_deduction || "",
-        take_home: customer.take_home || "",
-        loan_amount_requested: customer.loan_amount_requested || "",
-        loan_purpose: customer.loan_purpose || "",
-        status: customer.status || "inactive",
+        bank_monthly_deduction: customer.bank_monthly_deduction ?? "",
+        take_home: customer.take_home ?? "",
+        loan_amount_requested: customer.loan_amount_requested ?? "",
+        loan_purpose: customer.loan_purpose ?? "",
+        status: customer.status ?? "inactive",
+
+        // GUARANTORS SAFE → no rerenders
         guarantors:
             customer.guarantors?.length > 0
                 ? customer.guarantors.map((g) => ({
-                      id: g.id || null,
-                      name: g.name || "",
-                      occupation: g.occupation || "",
-                      residence: g.residence || "",
-                      contact: g.contact || "",
+                      id: g.id ?? null,
+                      name: g.name ?? "",
+                      occupation: g.occupation ?? "",
+                      residence: g.residence ?? "",
+                      contact: g.contact ?? "",
                   }))
                 : [{ name: "", occupation: "", residence: "", contact: "" }],
     });
 
-    /* ➕ Add / Remove / Update Guarantors */
-    const addGuarantor = () =>
-        setData("guarantors", [
-            ...data.guarantors,
-            { name: "", occupation: "", residence: "", contact: "" },
-        ]);
-
-    const removeGuarantor = (index) =>
-        setData(
-            "guarantors",
-            data.guarantors.filter((_, i) => i !== index),
-        );
-
+    /** -----------------------------------------
+     *  GUARANTOR HANDLERS (FAST & NO LAG)
+     * ----------------------------------------- */
     const updateGuarantor = (index, field, value) => {
         const updated = [...data.guarantors];
         updated[index][field] = value;
         setData("guarantors", updated);
     };
 
-    /* 💾 Submit */
+    const addGuarantor = () =>
+        setData("guarantors", [
+            ...data.guarantors,
+            { name: "", occupation: "", residence: "", contact: "" },
+        ]);
+
+    const removeGuarantor = (i) =>
+        setData(
+            "guarantors",
+            data.guarantors.filter((_, index) => index !== i),
+        );
+
+    /** -----------------------------------------
+     *  SUBMIT UPDATE (CORRECTED)
+     * ----------------------------------------- */
     const handleSubmit = (e) => {
         e.preventDefault();
-        put(route(`${basePath}.customers.update`, customer.id), {
-            preserveScroll: true,
-            onSuccess: () => {
-                setToast("✅ Customer updated successfully!");
-                setToastColor("bg-green-600");
-                setTimeout(() => setToast(null), 2500);
+
+        put(
+            route(`${basePath}.customers.update`, customer.id),
+            data, // <-- CORRECT ARG 2
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    window.toast?.success("Customer updated successfully!");
+                },
+                onError: (errs) => {
+                    window.toast?.error(
+                        Object.values(errs)[0] || "Failed to update customer.",
+                    );
+                },
             },
-            onError: (errs) => {
-                setToast(
-                    Object.values(errs)[0] || "⚠️ Failed to update customer.",
-                );
-                setToastColor("bg-red-600");
-                setTimeout(() => setToast(null), 3000);
-            },
-        });
+        );
     };
 
     return (
@@ -91,16 +105,6 @@ export default function Edit() {
         >
             <Head title={`Edit ${customer.full_name ?? "Customer"}`} />
 
-            {/* Toast Notification */}
-            {toast && (
-                <div
-                    className={`fixed top-5 right-5 z-50 ${toastColor} text-white px-4 py-3 rounded-lg shadow-lg`}
-                >
-                    {toast}
-                </div>
-            )}
-
-            {/* Main Content */}
             <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 <div className="bg-white shadow-lg rounded-lg p-6 space-y-6">
                     <h1 className="text-2xl font-bold text-gray-800 mb-6">
@@ -108,7 +112,7 @@ export default function Edit() {
                     </h1>
 
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* 🧍 Personal Information */}
+                        {/* PERSONAL INFO */}
                         <Section title="Personal Information">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -118,12 +122,14 @@ export default function Edit() {
                                     error={errors.full_name}
                                     required
                                 />
+
                                 <Field
                                     label="Phone"
                                     value={data.phone}
                                     onChange={(v) => setData("phone", v)}
                                     error={errors.phone}
                                 />
+
                                 <Field
                                     label="Email"
                                     type="email"
@@ -131,6 +137,7 @@ export default function Edit() {
                                     onChange={(v) => setData("email", v)}
                                     error={errors.email}
                                 />
+
                                 <SelectField
                                     label="Marital Status"
                                     value={data.marital_status}
@@ -143,6 +150,7 @@ export default function Edit() {
                                         { value: "married", label: "Married" },
                                     ]}
                                 />
+
                                 <SelectField
                                     label="Gender"
                                     value={data.gender}
@@ -153,6 +161,7 @@ export default function Edit() {
                                         { value: "F", label: "Female" },
                                     ]}
                                 />
+
                                 <SelectField
                                     label="Status"
                                     value={data.status}
@@ -172,7 +181,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* 🏠 Address */}
+                        {/* ADDRESS */}
                         <Section title="Address Information">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -210,7 +219,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* 💼 Work & Income */}
+                        {/* WORK */}
                         <Section title="Work & Income">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -241,8 +250,8 @@ export default function Edit() {
                                 <CheckboxField
                                     label="Has Bank Loan"
                                     checked={data.has_bank_loan}
-                                    onChange={(checked) =>
-                                        setData("has_bank_loan", checked)
+                                    onChange={(v) =>
+                                        setData("has_bank_loan", v)
                                     }
                                 />
                                 <Field
@@ -262,7 +271,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* 💰 Loan Request */}
+                        {/* LOAN REQUEST */}
                         <Section title="Loan Request Information">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Field
@@ -281,7 +290,7 @@ export default function Edit() {
                             </div>
                         </Section>
 
-                        {/* 👥 Guarantors */}
+                        {/* GUARANTORS */}
                         <Section title="Guarantors">
                             <div className="flex justify-between mb-3">
                                 <h3 className="text-gray-800 font-semibold">
@@ -296,42 +305,42 @@ export default function Edit() {
                                 </button>
                             </div>
 
-                            {data.guarantors.map((g, i) => (
+                            {data.guarantors.map((g, idx) => (
                                 <div
-                                    key={i}
+                                    key={idx}
                                     className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-3 border-b pb-3"
                                 >
                                     <input
-                                        className="border rounded w-full p-2 bg-white text-gray-900"
-                                        placeholder="Name"
+                                        className="border rounded p-2"
                                         value={g.name}
+                                        placeholder="Name"
                                         onChange={(e) =>
                                             updateGuarantor(
-                                                i,
+                                                idx,
                                                 "name",
                                                 e.target.value,
                                             )
                                         }
                                     />
                                     <input
-                                        className="border rounded w-full p-2 bg-white text-gray-900"
-                                        placeholder="Occupation"
+                                        className="border rounded p-2"
                                         value={g.occupation}
+                                        placeholder="Occupation"
                                         onChange={(e) =>
                                             updateGuarantor(
-                                                i,
+                                                idx,
                                                 "occupation",
                                                 e.target.value,
                                             )
                                         }
                                     />
                                     <input
-                                        className="border rounded w-full p-2 bg-white text-gray-900"
-                                        placeholder="Residence"
+                                        className="border rounded p-2"
                                         value={g.residence}
+                                        placeholder="Residence"
                                         onChange={(e) =>
                                             updateGuarantor(
-                                                i,
+                                                idx,
                                                 "residence",
                                                 e.target.value,
                                             )
@@ -339,24 +348,24 @@ export default function Edit() {
                                     />
                                     <div className="flex gap-2">
                                         <input
-                                            className="border rounded w-full p-2 bg-white text-gray-900 flex-1"
-                                            placeholder="Contact"
+                                            className="border rounded p-2 w-full"
                                             value={g.contact}
+                                            placeholder="Contact"
                                             onChange={(e) =>
                                                 updateGuarantor(
-                                                    i,
+                                                    idx,
                                                     "contact",
                                                     e.target.value,
                                                 )
                                             }
                                         />
-                                        {i > 0 && (
+                                        {idx > 0 && (
                                             <button
                                                 type="button"
                                                 onClick={() =>
-                                                    removeGuarantor(i)
+                                                    removeGuarantor(idx)
                                                 }
-                                                className="px-3 py-1 border rounded text-sm text-gray-700 hover:bg-gray-100"
+                                                className="px-3 py-1 border rounded text-sm"
                                             >
                                                 Remove
                                             </button>
@@ -366,8 +375,8 @@ export default function Edit() {
                             ))}
                         </Section>
 
-                        {/* ✅ Submit */}
-                        <div className="flex justify-between items-center pt-4 border-t">
+                        {/* SUBMIT */}
+                        <div className="flex justify-between pt-4 border-t">
                             <Link
                                 href={route(`${basePath}.customers.index`)}
                                 className="text-gray-600 hover:underline"
@@ -378,7 +387,7 @@ export default function Edit() {
                             <button
                                 type="submit"
                                 disabled={processing}
-                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 transition"
+                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
                             >
                                 {processing ? "Saving..." : "Update Customer"}
                             </button>
@@ -390,13 +399,11 @@ export default function Edit() {
     );
 }
 
-/* 🔹 Helper Components */
+/* REUSABLE COMPONENTS */
 function Section({ title, children }) {
     return (
         <section className="mt-4">
-            <h2 className="text-lg font-semibold mb-3 text-gray-800">
-                {title}
-            </h2>
+            <h2 className="text-lg font-semibold mb-3">{title}</h2>
             {children}
         </section>
     );
@@ -411,7 +418,7 @@ function Field({ label, value, onChange, type = "text", error, required }) {
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 required={required}
-                className="border rounded w-full p-2 bg-white text-gray-900"
+                className="border rounded w-full p-2"
             />
             {error && <p className="text-red-600 text-xs mt-1">{error}</p>}
         </div>
@@ -425,7 +432,7 @@ function SelectField({ label, value, onChange, options }) {
             <select
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                className="border rounded w-full p-2 bg-white text-gray-900"
+                className="border rounded w-full p-2"
             >
                 {options.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -439,14 +446,14 @@ function SelectField({ label, value, onChange, options }) {
 
 function CheckboxField({ label, checked, onChange }) {
     return (
-        <div className="flex items-center gap-2 mt-6">
+        <label className="flex items-center gap-2 mt-6">
             <input
                 type="checkbox"
                 checked={checked}
                 onChange={(e) => onChange(e.target.checked)}
                 className="h-5 w-5 text-blue-600"
             />
-            <label className="text-sm text-gray-700">{label}</label>
-        </div>
+            <span className="text-sm">{label}</span>
+        </label>
     );
 }

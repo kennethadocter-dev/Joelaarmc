@@ -18,6 +18,7 @@ class Payment extends Model
         'payment_method',
         'note',
         'reference',
+        'idempotency_key', // ✅ important for firstOrCreate & duplicate protection
     ];
 
     protected $casts = [
@@ -35,124 +36,63 @@ class Payment extends Model
 
     public function receivedByUser()
     {
+        // We're already in namespace App\Models, so User::class resolves correctly.
         return $this->belongsTo(User::class, 'received_by');
     }
 
     /* ───────────────────────────────
-     |  ⚙️ AUTO-UPDATE HOOKS
+     |  ⚙️ MODEL EVENTS (AUTO UPDATES)
      ─────────────────────────────── */
 
     protected static function booted()
     {
-        /**
-         * 🔁 When a new payment is created
-         */
+        // When a payment is created
         static::created(function (Payment $payment) {
             try {
-                $loan = $payment->loan;
-                if (!$loan) return;
-
-                // 🔄 Update payment totals
-                $loan->amount_paid = $loan->payments()->sum('amount');
-                $loan->amount_remaining = max(0, $loan->total_with_interest - $loan->amount_paid);
-
-                // 🔁 Update status logic
-                if ($loan->amount_remaining <= 0.01) {
-                    $loan->status = 'paid';
-                    $loan->interest_earned = round($loan->amount_paid - $loan->amount, 2);
-                } elseif ($loan->due_date && $loan->due_date->isPast() && $loan->status !== 'paid') {
-                    $loan->status = 'overdue';
-                } else {
-                    $loan->status = 'active';
+                if ($payment->loan) {
+                    $payment->loan->recalculateSummary();
+                    Log::info("💰 Payment #{$payment->id} created, Loan #{$payment->loan->id} recalculated");
                 }
-
-                // ✅ Force-save loan to persist updates
-                $loan->save();
-
-                // 🔁 Sync customer totals
-                if ($loan->customer) {
-                    $loan->customer->update([
-                        'total_loans' => $loan->customer->loans()->sum('amount'),
-                        'total_paid' => $loan->customer->loans()->sum('amount_paid'),
-                        'total_remaining' => $loan->customer->loans()->sum('amount_remaining'),
-                        'active_loans_count' => $loan->customer->loans()
-                            ->whereIn('status', ['active', 'overdue', 'pending'])
-                            ->count(),
-                    ]);
-                }
-
-                Log::info("💰 Payment #{$payment->id} applied to Loan #{$loan->id}, new status: {$loan->status}");
-
             } catch (\Throwable $e) {
-                Log::error('❌ Payment auto-update failed', [
+                Log::error('❌ Payment created hook failed', [
                     'payment_id' => $payment->id,
-                    'error' => $e->getMessage(),
-                    'line' => $e->getLine(),
-                    'file' => $e->getFile(),
+                    'error'      => $e->getMessage(),
+                    'line'       => $e->getLine(),
+                    'file'       => $e->getFile(),
                 ]);
             }
         });
 
-        /**
-         * 🔁 When a payment is updated
-         */
+        // When a payment is updated
         static::updated(function (Payment $payment) {
             try {
-                $loan = $payment->loan;
-                if (!$loan) return;
-
-                $loan->amount_paid = $loan->payments()->sum('amount');
-                $loan->amount_remaining = max(0, $loan->total_with_interest - $loan->amount_paid);
-
-                if ($loan->amount_remaining <= 0.01) {
-                    $loan->status = 'paid';
-                    $loan->interest_earned = round($loan->amount_paid - $loan->amount, 2);
-                } elseif ($loan->due_date && $loan->due_date->isPast()) {
-                    $loan->status = 'overdue';
-                } else {
-                    $loan->status = 'active';
+                if ($payment->loan) {
+                    $payment->loan->recalculateSummary();
+                    Log::info("🔄 Payment #{$payment->id} updated, Loan #{$payment->loan->id} recalculated");
                 }
-
-                $loan->save();
-
-                Log::info("🔄 Payment #{$payment->id} updated Loan #{$loan->id}");
-
             } catch (\Throwable $e) {
-                Log::error('❌ Payment update sync failed', [
+                Log::error('❌ Payment updated hook failed', [
                     'payment_id' => $payment->id,
-                    'error' => $e->getMessage(),
+                    'error'      => $e->getMessage(),
+                    'line'       => $e->getLine(),
+                    'file'       => $e->getFile(),
                 ]);
             }
         });
 
-        /**
-         * 🔁 When a payment is deleted
-         */
+        // When a payment is deleted
         static::deleted(function (Payment $payment) {
             try {
-                $loan = $payment->loan;
-                if (!$loan) return;
-
-                $loan->amount_paid = $loan->payments()->sum('amount');
-                $loan->amount_remaining = max(0, $loan->total_with_interest - $loan->amount_paid);
-
-                if ($loan->amount_remaining <= 0.01) {
-                    $loan->status = 'paid';
-                    $loan->interest_earned = round($loan->amount_paid - $loan->amount, 2);
-                } elseif ($loan->due_date && $loan->due_date->isPast()) {
-                    $loan->status = 'overdue';
-                } else {
-                    $loan->status = 'active';
+                if ($payment->loan) {
+                    $payment->loan->recalculateSummary();
+                    Log::info("🗑️ Payment #{$payment->id} deleted, Loan #{$payment->loan->id} recalculated");
                 }
-
-                $loan->save();
-
-                Log::info("🗑️ Payment #{$payment->id} deleted, Loan #{$loan->id} recalculated");
-
             } catch (\Throwable $e) {
-                Log::error('❌ Payment delete sync failed', [
+                Log::error('❌ Payment deleted hook failed', [
                     'payment_id' => $payment->id,
-                    'error' => $e->getMessage(),
+                    'error'      => $e->getMessage(),
+                    'line'       => $e->getLine(),
+                    'file'       => $e->getFile(),
                 ]);
             }
         });

@@ -18,19 +18,16 @@ class CustomerController extends Controller
     public function index(Request $request)
     {
         $search = $request->input('search', '');
-        $status = $request->input('status', 'active'); // default = active
+        $status = $request->input('status', 'active');
 
-        // Normalise / guard status
         if (!in_array($status, ['active', 'inactive', 'suspended', 'all'])) {
             $status = 'active';
         }
 
         $query = Customer::with('loans')
-            // Status filter
             ->when($status !== 'all', function ($q) use ($status) {
                 $q->where('status', $status);
             })
-            // Search filter
             ->when($search, function ($q) use ($search) {
                 $q->where(function ($inner) use ($search) {
                     $inner->where('full_name', 'like', "%{$search}%")
@@ -42,7 +39,6 @@ class CustomerController extends Controller
 
         $customers = $query->paginate(10)->withQueryString();
 
-        // Global counts (for cards)
         $activeCount = Customer::where('status', 'active')->count();
         $inactiveCount = Customer::where('status', 'inactive')->count();
         $suspendedCount = Customer::where('status', 'suspended')->count();
@@ -53,7 +49,6 @@ class CustomerController extends Controller
             'pagination' => $customers->toArray(),
 
             'counts' => [
-                // All = active + inactive + suspended
                 'total'     => $activeCount + $inactiveCount + $suspendedCount,
                 'active'    => $activeCount,
                 'inactive'  => $inactiveCount,
@@ -70,10 +65,14 @@ class CustomerController extends Controller
     }
 
     /**
-     * ➕ Create customer form
+     * ➕ Create customer form (ADMIN ONLY)
      */
     public function create()
     {
+        if (auth()->user()->role === 'superadmin') {
+            return back()->with('error', 'Superadmin cannot create customers.');
+        }
+
         return Inertia::render('Admin/Customers/Create', [
             'auth' => ['user' => auth()->user()],
             'basePath' => 'admin',
@@ -81,13 +80,16 @@ class CustomerController extends Controller
     }
 
     /**
-     * 💾 Store new customer
+     * 💾 Store new customer (ADMIN ONLY)
      */
     public function store(Request $request)
     {
+        if (auth()->user()->role === 'superadmin') {
+            return back()->with('error', 'Superadmin cannot create customers.');
+        }
+
         $validated = $this->validateCustomer($request);
 
-        // Normalize gender
         if (!empty($validated['gender'])) {
             $g = strtolower(trim($validated['gender']));
             $validated['gender'] = in_array($g, ['male', 'm']) ? 'M' :
@@ -98,7 +100,6 @@ class CustomerController extends Controller
         try {
             $customer = Customer::create($validated);
 
-            // Save guarantors
             foreach ($request->guarantors ?? [] as $g) {
                 if (!empty($g['name'])) {
                     Guarantor::create([
@@ -126,7 +127,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * 👁️ Show customer
+     * 👁️ Show customer (SUPERADMIN CAN VIEW)
      */
     public function show(Customer $customer, Request $request)
     {
@@ -140,10 +141,14 @@ class CustomerController extends Controller
     }
 
     /**
-     * ✏️ Edit customer
+     * ✏️ Edit customer (ADMIN ONLY)
      */
     public function edit(Customer $customer)
     {
+        if (auth()->user()->role === 'superadmin') {
+            return back()->with('error', 'Superadmin cannot edit customers.');
+        }
+
         $customer->load('guarantors');
 
         return Inertia::render('Admin/Customers/Edit', [
@@ -154,10 +159,14 @@ class CustomerController extends Controller
     }
 
     /**
-     * 🔄 Update customer
+     * 🔄 Update customer (ADMIN ONLY)
      */
     public function update(Request $request, Customer $customer)
     {
+        if (auth()->user()->role === 'superadmin') {
+            return back()->with('error', 'Superadmin cannot update customers.');
+        }
+
         $validated = $this->validateCustomer($request, $customer->id);
 
         if (!empty($validated['gender'])) {
@@ -170,7 +179,6 @@ class CustomerController extends Controller
         try {
             $customer->update($validated);
 
-            // Update guarantors
             $customer->guarantors()->delete();
             foreach ($request->guarantors ?? [] as $g) {
                 if (!empty($g['name'])) {
@@ -195,34 +203,31 @@ class CustomerController extends Controller
         }
     }
 
-    /* ============================================================
-       🟡 SUSPEND / REACTIVATE CUSTOMER (with name confirmation)
-       ============================================================ */
+    /**
+     * 🟡 SUSPEND / REACTIVATE CUSTOMER (ADMIN ONLY)
+     */
     public function toggleSuspend(Request $request, Customer $customer)
     {
         $user = auth()->user();
 
-        // Only admin can suspend / reactivate
+        if ($user->role === 'superadmin') {
+            return back()->with('error', 'Superadmin cannot suspend customers.');
+        }
+
         if ($user->role !== 'admin') {
             return back()->with('error', 'Only admin can change customer status.');
         }
 
-        // Confirm name typed in modal
         $request->validate([
             'confirm_name' => 'required|string|max:255',
         ]);
 
-        if (
-            trim(strtolower($request->confirm_name)) !==
-            trim(strtolower($customer->full_name))
-        ) {
+        // 🔥 EXACT MATCH — NO strtolower()
+        if (trim($request->confirm_name) !== trim($customer->full_name)) {
             return back()->with('error', 'Name does not match. Status was NOT changed.');
         }
 
-        // Toggle status
-        $newStatus = $customer->status === 'suspended'
-            ? 'active'
-            : 'suspended';
+        $newStatus = $customer->status === 'suspended' ? 'active' : 'suspended';
 
         $customer->status = $newStatus;
         $customer->save();
@@ -236,32 +241,31 @@ class CustomerController extends Controller
     }
 
     /**
-     * ❌ PERMANENT DELETE CUSTOMER — Requires name confirmation
+     * ❌ PERMANENT DELETE CUSTOMER (ADMIN ONLY)
      */
     public function destroy(Request $request, Customer $customer)
     {
         $user = auth()->user();
 
-        if (!in_array($user->role, ['admin', 'superadmin'])) {
+        if ($user->role === 'superadmin') {
+            return back()->with('error', 'Superadmin cannot delete customers.');
+        }
+
+        if ($user->role !== 'admin') {
             return back()->with('error', 'You do not have permission to delete customers.');
         }
 
-        // Validate typed name
         $request->validate([
             'confirm_name' => 'required|string|max:255',
         ]);
 
-        // Compare entered name with full_name
-        if (
-            trim(strtolower($request->confirm_name)) !==
-            trim(strtolower($customer->full_name))
-        ) {
+        // 🔥 EXACT MATCH — NO strtolower()
+        if (trim($request->confirm_name) !== trim($customer->full_name)) {
             return back()->with('error', 'Name does not match. Customer was NOT deleted.');
         }
 
         DB::beginTransaction();
         try {
-            // Permanently delete using your model helper
             $success = $customer->forceDeleteFully();
 
             if (!$success) {
