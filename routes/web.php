@@ -70,10 +70,14 @@ Route::prefix('superadmin')
         Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('dashboard.loansByYear');
         Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])->name('dashboard.expectedInterest');
 
-        // SETTINGS
+        // SETTINGS (SUPERADMIN)
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings');
-        Route::put('/settings/update', [AdminSettingsController::class, 'update'])->name('settings.update');
-        Route::put('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
+        // ✅ Accept POST or PUT on /superadmin/settings
+        Route::match(['post', 'put'], '/settings', [AdminSettingsController::class, 'update'])
+            ->name('settings.update');
+        // ✅ Accept POST or PUT for reset as well
+        Route::match(['post', 'put'], '/settings/reset', [AdminSettingsController::class, 'reset'])
+            ->name('settings.reset');
 
         // USERS
         Route::resource('users', SuperadminUserController::class)->only(['index', 'show']);
@@ -99,17 +103,9 @@ Route::prefix('superadmin')
         // REPORTS
         Route::resource('reports', AdminReportsController::class)->only(['index', 'show']);
 
-        // SUPERADMIN CAN RECORD PAYMENTS
-        Route::post('payments', [AdminPaymentController::class, 'store'])
-            ->name('payments.store');
-
-        // SUPERADMIN VIEW PAYMENTS
-        Route::resource('payments', AdminPaymentController::class)
-            ->only(['index', 'show'])
-            ->names([
-                'index' => 'payments.index',
-                'show'  => 'payments.show',
-            ]);
+        // PAYMENTS
+        Route::post('payments', [AdminPaymentController::class, 'store'])->name('payments.store');
+        Route::resource('payments', AdminPaymentController::class)->only(['index', 'show']);
 
         // ACTIVITY LOGS
         Route::get('/activity', [SuperadminActivityController::class, 'index'])->name('activity.index');
@@ -133,7 +129,7 @@ Route::prefix('admin')
         // CUSTOMERS
         Route::resource('customers', AdminCustomerController::class);
 
-        // CUSTOMER SUSPEND
+        // SUSPEND CUSTOMER
         Route::post('/customers/{customer}/toggle-suspend',
             [AdminCustomerController::class, 'toggleSuspend'])
             ->name('customers.toggleSuspend');
@@ -141,7 +137,7 @@ Route::prefix('admin')
         // LOANS
         Route::resource('loans', AdminLoanController::class);
 
-        // Legacy: record-payment route inside loan controller
+        // OLD PAYMENT ROUTE
         Route::post('/loans/{loan}/record-payment', [AdminLoanController::class, 'recordPayment'])
             ->name('loans.recordPayment');
 
@@ -152,25 +148,21 @@ Route::prefix('admin')
         Route::post('/reports/clear-failures', [AdminReportsController::class, 'clearEmailFailures'])
             ->name('reports.clearEmailFailures');
 
-        // ADMIN PAYMENTS
+        // PAYMENTS
         Route::post('/payments/store', [AdminPaymentController::class, 'store'])
             ->name('payments.store');
-        #Route::post('payments', [AdminPaymentController::class, 'store'])
-            #->name('payments.store');
+        Route::resource('payments', AdminPaymentController::class)->only(['index', 'show']);
 
-        Route::resource('payments', AdminPaymentController::class)
-            ->only(['index', 'show'])
-            ->names([
-                'index' => 'payments.index',
-                'show'  => 'payments.show',
-            ]);
-
-        // SETTINGS
+        // SETTINGS (ADMIN)
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings');
-        Route::put('/settings/update', [AdminSettingsController::class, 'update'])->name('settings.update');
-        Route::put('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
+        // ✅ Accept POST or PUT on /admin/settings
+        Route::match(['post', 'put'], '/settings', [AdminSettingsController::class, 'update'])
+            ->name('settings.update');
+        // ✅ Accept POST or PUT for reset as well
+        Route::match(['post', 'put'], '/settings/reset', [AdminSettingsController::class, 'reset'])
+            ->name('settings.reset');
 
-        // ACTIVITY LOGS (view only)
+        // ACTIVITY LOGS
         Route::get('/activity', [SuperadminActivityController::class, 'index'])->name('activity.index');
     });
 
@@ -186,7 +178,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
 
 // ======================================================================
-// 404
+// 404 Page
 // ======================================================================
 Route::fallback(fn () =>
     Inertia::render('Errors/404', [

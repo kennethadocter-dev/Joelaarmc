@@ -32,7 +32,6 @@ class SettingsController extends Controller
         try {
             $settings = Setting::firstOrCreate([]);
 
-            // ✅ Always load the shared React component
             return Inertia::render('Admin/Settings/Index', [
                 'settings' => $settings,
                 'auth'     => ['user' => auth()->user()],
@@ -51,6 +50,11 @@ class SettingsController extends Controller
     public function update(Request $request)
     {
         try {
+            /** 🛠 FIX — Allow POST or PUT */
+            if ($request->isMethod('post')) {
+                $request->merge(['_method' => 'put']);
+            }
+
             $validated = $request->validate([
                 'company_name'          => 'nullable|string|max:255',
                 'address'               => 'nullable|string|max:255',
@@ -70,7 +74,10 @@ class SettingsController extends Controller
             $settings = Setting::firstOrCreate([]);
             $settings->fill(array_filter($validated))->save();
 
-            ActivityLogger::log('Updated Settings', 'Settings updated by ' . Auth::user()->name);
+            ActivityLogger::log(
+                'Updated Settings',
+                'Settings updated by ' . Auth::user()->name
+            );
 
             return back()->with('success', '✅ Settings updated successfully.');
         } catch (\Throwable $e) {
@@ -100,7 +107,10 @@ class SettingsController extends Controller
                 'allow_early_repayment' => true,
             ])->save();
 
-            ActivityLogger::log('Reset Settings', 'Settings reset by ' . Auth::user()->name);
+            ActivityLogger::log(
+                'Reset Settings',
+                'Settings reset by ' . Auth::user()->name
+            );
 
             return back()->with('success', '🔁 Settings reset to default values.');
         } catch (\Throwable $e) {
@@ -118,7 +128,7 @@ class SettingsController extends Controller
             'error' => $e->getMessage(),
         ]);
 
-        return redirect()->route($this->basePath() . '.settings.index')
+        return redirect()->route($this->basePath() . '.settings')
             ->with('error', $message);
     }
 }

@@ -23,18 +23,27 @@ export default function SettingsIndex() {
         _method: "put",
     });
 
-    // ✅ Submit form
+    /** ✅ SUBMIT FORM FIX — uses router.post with _method: put */
     const submit = (e) => {
         e.preventDefault();
-        post(route(`${basePath}.settings.update`), {
-            forceFormData: true,
-            onSuccess: () =>
-                window.toast?.success?.("✅ Settings saved successfully!"),
-            onError: () => window.toast?.error?.("⚠️ Failed to save settings."),
-        });
+
+        router.post(
+            route(`${basePath}.settings.update`),
+            {
+                ...data,
+                _method: "put",
+            },
+            {
+                forceFormData: true,
+                onSuccess: () =>
+                    window.toast?.success?.("✅ Settings saved successfully!"),
+                onError: () =>
+                    window.toast?.error?.("⚠️ Failed to save settings."),
+            },
+        );
     };
 
-    // ♻️ Reset settings
+    /** ♻️ Reset Settings */
     const handleReset = () => {
         confirm(
             "Confirm Reset",
@@ -59,7 +68,7 @@ export default function SettingsIndex() {
         );
     };
 
-    // 🎉 Flash messages
+    /** 🎉 Flash Messages */
     useEffect(() => {
         if (flash?.success) window.toast?.success?.(flash.success);
         if (flash?.error) window.toast?.error?.(flash.error);
@@ -82,6 +91,7 @@ export default function SettingsIndex() {
                         <h3 className="font-semibold text-lg border-b border-gray-300 pb-2 text-gray-800">
                             Organization Info
                         </h3>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {[
                                 ["Company Name", "company_name"],
@@ -122,6 +132,7 @@ export default function SettingsIndex() {
                         <h3 className="font-semibold text-lg border-b border-gray-300 pb-2 text-gray-800">
                             Loan Defaults
                         </h3>
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <InputNumber
                                 label="Default Interest Rate (%)"
