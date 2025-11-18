@@ -68,7 +68,6 @@ class Loan extends Model
 
     public function guarantors()
     {
-        // Optional relationship – safe even if there are no guarantors
         return $this->hasMany(\App\Models\Guarantor::class);
     }
 
@@ -76,7 +75,7 @@ class Loan extends Model
      | 🧮 CALCULATION HELPERS
      ─────────────────────────────── */
 
-    /** 💡 Calculates expected interest safely */
+    /** Calculate expected interest */
     public function calculateExpectedInterest(): float
     {
         try {
@@ -87,23 +86,21 @@ class Loan extends Model
                 return 0.00;
             }
 
-            // Base ratios by term (months)
             $ratios = [
-                1 => 1.20,   // 20%
-                2 => 1.31,   // 31%
-                3 => 1.425,  // 42.5%
-                4 => 1.56,   // 56%
-                5 => 1.67,   // 67%
-                6 => 1.83,   // 83%
+                1 => 1.20,
+                2 => 1.31,
+                3 => 1.425,
+                4 => 1.56,
+                5 => 1.67,
+                6 => 1.83,
             ];
 
-            // Use month ratio if defined, else fallback to interest_rate (default 20%)
             $ratio = $ratios[$term] ?? (1 + (($this->interest_rate ?? 20) / 100));
 
             return round(($amount * $ratio) - $amount, 2);
 
         } catch (\Throwable $e) {
-            Log::error('❌ Failed to calculate expected interest', [
+            Log::error('Interest calculation failed', [
                 'loan_id' => $this->id ?? 'unknown',
                 'error'   => $e->getMessage(),
             ]);
@@ -111,125 +108,33 @@ class Loan extends Model
         }
     }
 
-    /** 💰 Calculates total with interest */
+    /** Total repayment amount */
     public function calculateTotalWithInterest(): float
     {
-        $amount = floatval($this->amount ?? 0);
-        return round($amount + $this->calculateExpectedInterest(), 2);
-    }
-
-    /** 🔄 Recalculate and sync all summary fields (single source of truth) */
-    public function recalculateSummary(): void
-    {
-        try {
-            // Payment-based totals
-            $this->amount_paid         = $this->payments()->sum('amount');
-            $this->expected_interest   = $this->calculateExpectedInterest();
-            $this->total_with_interest = $this->calculateTotalWithInterest();
-
-            // Remaining balance
-            $remaining = round($this->total_with_interest - $this->amount_paid, 2);
-            $this->amount_remaining = max($remaining, 0);
-
-            // Status logic
-            if ($this->amount_remaining <= 0.01) {
-                $this->status          = 'paid';
-                $this->interest_earned = round($this->amount_paid - $this->amount, 2);
-            } elseif ($this->due_date && Carbon::parse($this->due_date)->isPast() && $this->status !== 'paid') {
-                $this->status = 'overdue';
-            } else {
-                $this->status = 'active';
-            }
-
-            $this->saveQuietly();
-
-            // Customer totals sync
-            if ($this->customer) {
-                $this->customer->total_loans        = $this->customer->loans()->sum('amount');
-                $this->customer->total_paid         = $this->customer->loans()->sum('amount_paid');
-                $this->customer->total_remaining    = $this->customer->loans()->sum('amount_remaining');
-                $this->customer->active_loans_count = $this->customer->loans()
-                    ->whereIn('status', ['active', 'overdue', 'pending'])
-                    ->count();
-                $this->customer->saveQuietly();
-            }
-
-        } catch (\Throwable $e) {
-            Log::error('❌ Loan recalculation failed', [
-                'loan_id' => $this->id ?? 'unknown',
-                'error'   => $e->getMessage(),
-                'line'    => $e->getLine(),
-                'file'    => $e->getFile(),
-            ]);
-        }
+        return round(floatval($this->amount) + $this->calculateExpectedInterest(), 2);
     }
 
     /* ───────────────────────────────
-     | ✅ STATUS HELPERS
+     | ❌ REMOVED: recalculateSummary()
+     | ❌ REMOVED: Auto updates on save
+     | WHY? — PaymentController handles all recalculation now.
      ─────────────────────────────── */
 
-    /** Marks loan as fully paid */
+    /* ───────────────────────────────
+     | STATUS HELPERS
+     ─────────────────────────────── */
+
     public function markAsPaid(): void
     {
-        $this->status           = 'paid';
+        $this->status = 'paid';
         $this->amount_remaining = 0;
-        $this->interest_earned  = round($this->amount_paid - $this->amount, 2);
-        $this->expected_interest = 0.00;
+        $this->interest_earned = round($this->amount_paid - $this->amount, 2);
         $this->saveQuietly();
     }
 
-    /** Marks loan as active again (after partial payment) */
     public function markAsActive(): void
     {
         $this->status = 'active';
         $this->saveQuietly();
-    }
-
-    /* ───────────────────────────────
-     | ⚙️ MODEL EVENTS (AUTO UPDATES)
-     ─────────────────────────────── */
-
-    protected static function booted()
-    {
-        // 🔹 Before saving
-        static::saving(function (Loan $loan) {
-            // Default interest rate 20% if missing
-            if (empty($loan->interest_rate)) {
-                $loan->interest_rate = 20;
-            }
-
-            $loan->status = strtolower(trim($loan->status ?? 'active'));
-
-            // Ensure expected interest & totals
-            if ($loan->amount > 0) {
-                if (empty($loan->expected_interest) || $loan->expected_interest <= 0) {
-                    $loan->expected_interest = $loan->calculateExpectedInterest();
-                }
-
-                if (empty($loan->total_with_interest) || $loan->total_with_interest <= 0) {
-                    $loan->total_with_interest = $loan->calculateTotalWithInterest();
-                }
-            }
-
-            // Default remaining amount
-            if ($loan->status === 'paid') {
-                $loan->amount_remaining = 0;
-            } elseif (is_null($loan->amount_remaining) || $loan->amount_remaining <= 0) {
-                $loan->amount_remaining = $loan->total_with_interest - ($loan->amount_paid ?? 0);
-            }
-        });
-
-        // 🔹 After delete — refresh customer stats
-        static::deleted(function (Loan $loan) {
-            if ($loan->customer) {
-                $loan->customer->total_loans        = $loan->customer->loans()->sum('amount');
-                $loan->customer->total_paid         = $loan->customer->loans()->sum('amount_paid');
-                $loan->customer->total_remaining    = $loan->customer->loans()->sum('amount_remaining');
-                $loan->customer->active_loans_count = $loan->customer->loans()
-                    ->whereIn('status', ['active', 'overdue', 'pending'])
-                    ->count();
-                $loan->customer->saveQuietly();
-            }
-        });
     }
 }

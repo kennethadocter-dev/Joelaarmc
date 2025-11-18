@@ -10,6 +10,7 @@ use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Helpers\ActivityLogger;
+use App\Helpers\SmsNotifier; // 📲 SMS ADDED
 
 class PaymentController extends Controller
 {
@@ -48,97 +49,74 @@ class PaymentController extends Controller
         }
     }
 
-    /** Show Record Cash Payment page */
-    public function create(Request $request)
-    {
-        try {
-            $loanId = $request->query('loan_id');
-            if (!$loanId) {
-                return back()->with('error', 'Missing loan ID.');
-            }
-
-            $loan = Loan::with('customer')->findOrFail($loanId);
-
-            return Inertia::render('Admin/Payments/RecordPayment', [
-                'loan'           => $loan,
-                'expectedAmount' => $loan->amount_remaining ?? 0,
-                'redirect'       => $request->query('redirect'),
-                'auth'           => ['user' => auth()->user()],
-                'basePath'       => $this->basePath(),
-                'flash'          => [
-                    'success' => session('success'),
-                    'error'   => session('error'),
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            return $this->debugError($e, '⚠️ Unable to load Cash Payment page.');
-        }
-    }
-
-    /** Store cash payment safely (duplicate-proof) */
+    /** Record a new cash payment */
     public function store(Request $request)
     {
         try {
-            Log::info('🧾 Payment Debug Start', [
-                'incoming_data' => $request->all(),
-                'user_id'       => auth()->id(),
-            ]);
-
-            if (!$request->has('loan_id') && $request->route('loan')) {
-                $request->merge(['loan_id' => $request->route('loan')]);
-            }
-
             $validated = $request->validate([
                 'loan_id' => 'required|exists:loans,id',
                 'amount'  => 'required|numeric|min:1',
                 'note'    => 'nullable|string|max:500',
             ]);
 
-            $loan   = Loan::with(['customer', 'loanSchedules'])->findOrFail($validated['loan_id']);
-            $userId = auth()->id() ?? 1;
+            $loan = Loan::with('loanSchedules', 'customer')->findOrFail($validated['loan_id']);
             $amount = floatval($validated['amount']);
+            $userId = auth()->id();
 
-            /** Idempotency Hash — prevents double-tap */
-            $hash = md5($loan->id . '|' . $amount . '|' . now()->format('YmdHis'));
+            /** REAL idempotency — allows safe single-click */
+            $hash = md5($loan->id . '|' . $amount . '|' . $userId . '|' . now()->format('YmdHi'));
 
             DB::beginTransaction();
 
-            $existing = Payment::where('idempotency_key', $hash)->first();
-            if ($existing) {
+            /** Prevent exact duplicate within same minute */
+            $exists = Payment::where('idempotency_key', $hash)->first();
+            if ($exists) {
                 DB::rollBack();
-
-                Log::warning('⚠️ Duplicate payment attempt blocked', [
-                    'loan_id' => $loan->id,
-                    'user_id' => $userId,
-                    'hash'    => $hash,
-                ]);
-
-                return redirect()
-                    ->route($this->basePath() . '.loans.show', $loan->id)
-                    ->with('success', '⚠️ Duplicate payment ignored.');
+                return back()->with('success', '⚠️ Duplicate payment blocked.');
             }
 
-            $payment = Payment::firstOrCreate(
-                ['idempotency_key' => $hash],
-                [
-                    'loan_id'        => $loan->id,
-                    'received_by'    => $userId,
-                    'amount'         => $amount,
-                    'paid_at'        => now(),
-                    'payment_method' => 'cash',
-                    'reference'      => 'CASH-' . now()->timestamp,
-                    'note'           => $validated['note'] ?? 'Cash payment recorded',
-                ]
-            );
+            /** 1️⃣ Create payment */
+            $payment = Payment::create([
+                'loan_id'        => $loan->id,
+                'received_by'    => $userId,
+                'amount'         => $amount,
+                'paid_at'        => now(),
+                'payment_method' => 'cash',
+                'idempotency_key'=> $hash,
+                'reference'      => 'CASH-' . now()->timestamp,
+                'note'           => $validated['note'] ?? null,
+            ]);
 
-            if ($payment->wasRecentlyCreated) {
-                // Distribute payment across loan schedules
-                $this->applyPaymentToLoan($loan, $amount);
+            /** 2️⃣ Apply payment to the schedules */
+            $this->applyPaymentToLoan($loan, $amount);
+
+            /** 3️⃣ Update loan summary exactly once */
+            $loan->amount_paid = $loan->payments()->sum('amount');
+            $loan->amount_remaining = $loan->loanSchedules()->sum('amount_left');
+            $loan->status = $loan->amount_remaining <= 0.01 ? 'paid' : 'active';
+            $loan->save();
+
+            /** 📲 SMS ADDED — Payment notification */
+            if (!empty($loan->customer->phone)) {
+                $sms = "Hi {$loan->customer->full_name}, payment of ₵" .
+                       number_format($amount, 2) .
+                       " received for your loan. Remaining balance: ₵" .
+                       number_format($loan->amount_remaining, 2) . ".";
+                SmsNotifier::send($loan->customer->phone, $sms);
+            }
+
+            /** 📲 SMS ADDED — If loan fully paid */
+            if ($loan->amount_remaining <= 0.01 && !empty($loan->customer->phone)) {
+                $msg = "🎉 Congratulations {$loan->customer->full_name}! Your loan (Code: {$loan->loan_code}) has been fully paid off. Thank you for trusting Joelaar Micro-Credit.";
+                SmsNotifier::send($loan->customer->phone, $msg);
             }
 
             DB::commit();
 
-            ActivityLogger::log('Cash Payment', "₵{$amount} recorded for Loan #{$loan->id}");
+            ActivityLogger::log(
+                'Cash Payment',
+                "₵{$amount} recorded for Loan #{$loan->id}"
+            );
 
             return redirect()
                 ->route($this->basePath() . '.loans.show', $loan->id)
@@ -146,44 +124,34 @@ class PaymentController extends Controller
 
         } catch (\Throwable $e) {
             DB::rollBack();
-
-            Log::error('❌ Cash Payment Error', [
-                'message' => $e->getMessage(),
-                'trace'   => $e->getTraceAsString(),
-            ]);
-
             return back()->with('error', '⚠️ Payment failed: ' . $e->getMessage());
         }
     }
 
-    /** Apply payment to loan schedule (no DB transaction here; caller handles it) */
-    private function applyPaymentToLoan(Loan $loan, float $amount): void
+    /** Apply payment to loan schedules */
+    private function applyPaymentToLoan(Loan $loan, float $amount)
     {
-        $remaining = round($amount, 2);
+        $remaining = $amount;
 
         $schedules = $loan->loanSchedules()
-            ->where(function ($q) {
-                $q->where('is_paid', false)->orWhereNull('is_paid');
-            })
+            ->where('is_paid', false)
             ->orderBy('payment_number')
             ->lockForUpdate()
             ->get();
 
         foreach ($schedules as $schedule) {
-            if ($remaining <= 0) {
-                break;
-            }
+            if ($remaining <= 0) break;
 
-            $balance = round(max(0, $schedule->amount - $schedule->amount_paid), 2);
-            if ($balance <= 0) {
-                continue;
-            }
+            $balance = $schedule->amount - $schedule->amount_paid;
+            if ($balance <= 0) continue;
 
             $applied = min($remaining, $balance);
+
             $schedule->amount_paid += $applied;
-            $schedule->amount_left = max(0, round($schedule->amount - $schedule->amount_paid, 2));
+            $schedule->amount_left = $schedule->amount - $schedule->amount_paid;
             $schedule->is_paid     = $schedule->amount_left <= 0.01;
-            $schedule->note        = $schedule->is_paid
+
+            $schedule->note = $schedule->is_paid
                 ? "Installment fully paid on " . now()->format('Y-m-d')
                 : "Partial payment on " . now()->format('Y-m-d');
 
@@ -191,28 +159,12 @@ class PaymentController extends Controller
 
             $remaining -= $applied;
         }
-
-        Log::info('💰 Payment applied to loan schedules', [
-            'loan_id'            => $loan->id,
-            'original_amount'    => $amount,
-            'unapplied_remaining'=> $remaining,
-        ]);
-
-        // 📌 We do NOT touch loan totals here.
-        // Loan totals are recalculated via Payment model events using Loan::recalculateSummary().
     }
 
-    /** Debug output */
     private function debugError(\Throwable $e, string $msg)
     {
-        Log::error('❌ PaymentController Error', [
-            'message' => $e->getMessage(),
-            'file'    => $e->getFile(),
-            'line'    => $e->getLine(),
-        ]);
-
         return response()->make("
-            <h2 style='color:red'>⚠️ {$msg}</h2>
+            <h2 style='color:red'>{$msg}</h2>
             <p><strong>{$e->getMessage()}</strong></p>
         ", 500);
     }

@@ -9,6 +9,7 @@ use App\Models\Guarantor;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
+use App\Helpers\SmsNotifier;
 
 class CustomerController extends Controller
 {
@@ -81,6 +82,7 @@ class CustomerController extends Controller
 
     /**
      * 💾 Store new customer (ADMIN ONLY)
+     * — NOW with welcome SMS added —
      */
     public function store(Request $request)
     {
@@ -113,6 +115,14 @@ class CustomerController extends Controller
             }
 
             DB::commit();
+
+            /**
+             * 📲 SEND WELCOME SMS
+             */
+            if (!empty($customer->phone)) {
+                $sms = "Welcome to Joelaar Micro-Credit. We are pleased to have you with us. Thank you for choosing us to support your financial needs.";
+                SmsNotifier::send($customer->phone, $sms);
+            }
 
             return redirect()->route('admin.loans.create', [
                 'customer_id' => $customer->id,
@@ -204,7 +214,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * 🟡 SUSPEND / REACTIVATE CUSTOMER (ADMIN ONLY)
+     * 🟡 Suspend / Reactivate Customer
      */
     public function toggleSuspend(Request $request, Customer $customer)
     {
@@ -222,7 +232,6 @@ class CustomerController extends Controller
             'confirm_name' => 'required|string|max:255',
         ]);
 
-        // 🔥 EXACT MATCH — NO strtolower()
         if (trim($request->confirm_name) !== trim($customer->full_name)) {
             return back()->with('error', 'Name does not match. Status was NOT changed.');
         }
@@ -241,7 +250,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * ❌ PERMANENT DELETE CUSTOMER (ADMIN ONLY)
+     * ❌ Delete customer (ADMIN ONLY)
      */
     public function destroy(Request $request, Customer $customer)
     {
@@ -259,7 +268,6 @@ class CustomerController extends Controller
             'confirm_name' => 'required|string|max:255',
         ]);
 
-        // 🔥 EXACT MATCH — NO strtolower()
         if (trim($request->confirm_name) !== trim($customer->full_name)) {
             return back()->with('error', 'Name does not match. Customer was NOT deleted.');
         }

@@ -152,8 +152,12 @@ Route::prefix('admin')
         Route::post('/reports/clear-failures', [AdminReportsController::class, 'clearEmailFailures'])
             ->name('reports.clearEmailFailures');
 
-        // ADMIN CANNOT RECORD PAYMENTS
-        // Only view:
+        // ADMIN PAYMENTS
+        Route::post('/payments/store', [AdminPaymentController::class, 'store'])
+            ->name('payments.store');
+        #Route::post('payments', [AdminPaymentController::class, 'store'])
+            #->name('payments.store');
+
         Route::resource('payments', AdminPaymentController::class)
             ->only(['index', 'show'])
             ->names([

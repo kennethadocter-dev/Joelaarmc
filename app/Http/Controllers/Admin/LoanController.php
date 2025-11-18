@@ -294,6 +294,15 @@ class LoanController extends Controller
             $loan->amount_paid      = $loan->payments->sum('amount');
             $loan->amount_remaining = max(0, $loan->total_with_interest - $loan->amount_paid);
 
+            /** 📲 NEW SMS ADDED — Payment made */
+            if (!empty($loan->customer->phone)) {
+                $sms = "Hi {$loan->customer->full_name}, payment of ₵" .
+                       number_format($validated['amount'], 2) .
+                       " received for your loan. Remaining balance: ₵" .
+                       number_format($loan->amount_remaining, 2);
+                SmsNotifier::send($loan->customer->phone, $sms);
+            }
+
             // Check completion
             if ($loan->amount_remaining <= 0) {
                 $loan->status = 'paid';
@@ -318,7 +327,7 @@ class LoanController extends Controller
                             ]);
                         }
 
-                        // SMS
+                        // 📲 NEW SMS ADDED — Loan fully paid
                         if (!empty($customer->phone)) {
                             $msg = "🎉 Congratulations {$customer->full_name}! Your loan (Code: {$loan->loan_code}) has been fully paid off. Thank you for trusting Joelaar Micro-Credit.";
                             SmsNotifier::send($customer->phone, $msg);

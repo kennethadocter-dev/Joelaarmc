@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Log;
 
 class Payment extends Model
 {
@@ -18,16 +17,16 @@ class Payment extends Model
         'payment_method',
         'note',
         'reference',
-        'idempotency_key', // ✅ important for firstOrCreate & duplicate protection
+        'idempotency_key', // Prevents duplicate payments
     ];
 
     protected $casts = [
         'paid_at' => 'datetime',
     ];
 
-    /* ───────────────────────────────
-     |  🔗 RELATIONSHIPS
-     ─────────────────────────────── */
+    /* -------------------------------------------
+     |  RELATIONSHIPS
+     -------------------------------------------- */
 
     public function loan()
     {
@@ -36,65 +35,26 @@ class Payment extends Model
 
     public function receivedByUser()
     {
-        // We're already in namespace App\Models, so User::class resolves correctly.
         return $this->belongsTo(User::class, 'received_by');
     }
 
-    /* ───────────────────────────────
-     |  ⚙️ MODEL EVENTS (AUTO UPDATES)
-     ─────────────────────────────── */
+    /* -------------------------------------------
+     |  IMPORTANT NOTE
+     |  ----------------
+     |  DO NOT auto-recalculate the loan inside
+     |  Payment model events (created, updated,
+     |  deleted). Your PaymentController already
+     |  applies the updates to the schedules.
+     |
+     |  Leaving recalculation hooks enabled was
+     |  causing payments to be applied TWICE.
+     |
+     |  So we disable model event recalculations.
+     -------------------------------------------- */
 
     protected static function booted()
     {
-        // When a payment is created
-        static::created(function (Payment $payment) {
-            try {
-                if ($payment->loan) {
-                    $payment->loan->recalculateSummary();
-                    Log::info("💰 Payment #{$payment->id} created, Loan #{$payment->loan->id} recalculated");
-                }
-            } catch (\Throwable $e) {
-                Log::error('❌ Payment created hook failed', [
-                    'payment_id' => $payment->id,
-                    'error'      => $e->getMessage(),
-                    'line'       => $e->getLine(),
-                    'file'       => $e->getFile(),
-                ]);
-            }
-        });
-
-        // When a payment is updated
-        static::updated(function (Payment $payment) {
-            try {
-                if ($payment->loan) {
-                    $payment->loan->recalculateSummary();
-                    Log::info("🔄 Payment #{$payment->id} updated, Loan #{$payment->loan->id} recalculated");
-                }
-            } catch (\Throwable $e) {
-                Log::error('❌ Payment updated hook failed', [
-                    'payment_id' => $payment->id,
-                    'error'      => $e->getMessage(),
-                    'line'       => $e->getLine(),
-                    'file'       => $e->getFile(),
-                ]);
-            }
-        });
-
-        // When a payment is deleted
-        static::deleted(function (Payment $payment) {
-            try {
-                if ($payment->loan) {
-                    $payment->loan->recalculateSummary();
-                    Log::info("🗑️ Payment #{$payment->id} deleted, Loan #{$payment->loan->id} recalculated");
-                }
-            } catch (\Throwable $e) {
-                Log::error('❌ Payment deleted hook failed', [
-                    'payment_id' => $payment->id,
-                    'error'      => $e->getMessage(),
-                    'line'       => $e->getLine(),
-                    'file'       => $e->getFile(),
-                ]);
-            }
-        });
+        // Leave empty to prevent double-deductions.
+        // All recalculation is handled manually inside controllers.
     }
 }
