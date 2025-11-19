@@ -12,7 +12,7 @@ import {
 } from "react-icons/fa";
 
 /* ======================================
-   SAFE ROUTE WRAPPER
+   SAFE ROUTE WRAPPER (for non-critical links)
 ======================================= */
 function safeRoute(name, params = {}) {
     try {
@@ -96,14 +96,11 @@ export default function Sidebar() {
                     ? "superadmin.reports.index"
                     : "admin.reports.index",
             icon: <FaFileAlt />,
-            href: safeRoute(
+            href:
                 role === "superadmin"
-                    ? "superadmin.reports.index"
-                    : "admin.reports.index",
-            ),
+                    ? route("superadmin.reports.index") // 🔥 FIXED for superadmin
+                    : route("admin.reports.index"),
         },
-
-        // SETTINGS (✔ FIXED)
         {
             name: "Settings",
             routeName:
@@ -135,12 +132,20 @@ export default function Sidebar() {
             icon: <FaUsers />,
             href: safeRoute("superadmin.users.index"),
         },
+
+        /* 
+        ===============================================
+        🚀 FIXED: Manage Customers MUST use route(), 
+        NOT safeRoute(), otherwise it becomes "#" 
+        ===============================================
+        */
         {
             name: "Manage Customers",
             routeName: "superadmin.manage-customers.index",
             icon: <FaUsers />,
-            href: safeRoute("superadmin.manage-customers.index"),
+            href: route("superadmin.manage-customers.index"),
         },
+
         {
             name: "System Control",
             routeName: "superadmin.system.index",

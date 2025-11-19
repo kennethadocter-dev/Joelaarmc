@@ -6,11 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
-use App\Mail\CustomerLoginMail;
-use App\Mail\CustomerWelcomeMail;
 use App\Helpers\SmsNotifier;
 use App\Helpers\ActivityLogger;
 
@@ -18,24 +15,24 @@ class ManageCustomersController extends Controller
 {
     public function __construct()
     {
-        // ✅ Restrict access to Superadmin only
         $this->middleware(function ($request, $next) {
-            $user = auth()->user();
-            if (!$user || $user->role !== 'superadmin') {
-                abort(403, 'Access denied. Only Superadmins can manage customer accounts.');
+            if (!auth()->user() || auth()->user()->role !== 'superadmin') {
+                abort(403, 'Access denied.');
             }
             return $next($request);
         });
     }
 
-    /** 📋 List all customers (active, deleted, suspended) */
+    /**
+     * 📋 List customers (active, inactive, suspended)
+     */
     public function index(Request $request)
     {
         try {
             $q = trim($request->query('q', ''));
             $status = $request->query('status', 'all');
 
-            $query = Customer::withTrashed()->orderByDesc('created_at');
+            $query = Customer::orderByDesc('created_at'); // No soft deletes
 
             if ($q) {
                 $query->where(function ($sub) use ($q) {
@@ -46,11 +43,7 @@ class ManageCustomersController extends Controller
             }
 
             if ($status !== 'all') {
-                if ($status === 'deleted') {
-                    $query->onlyTrashed();
-                } else {
-                    $query->where('status', $status);
-                }
+                $query->where('status', $status);
             }
 
             $customers = $query->get();
@@ -59,11 +52,10 @@ class ManageCustomersController extends Controller
                 'active'    => Customer::where('status', 'active')->count(),
                 'inactive'  => Customer::where('status', 'inactive')->count(),
                 'suspended' => Customer::where('status', 'suspended')->count(),
-                'deleted'   => Customer::onlyTrashed()->count(),
-                'total'     => Customer::withTrashed()->count(),
+                'total'     => Customer::count(),
             ];
 
-            ActivityLogger::log('Viewed Manage Customers', 'Superadmin viewed manage customers list.');
+            ActivityLogger::log('Viewed Manage Customers', 'Superadmin viewed manage customers.');
 
             return Inertia::render('Superadmin/ManageCustomers/Index', [
                 'customers' => $customers,
@@ -72,38 +64,36 @@ class ManageCustomersController extends Controller
                     'q'      => $q,
                     'status' => $status,
                 ],
-                'flash' => [
-                    'success' => session('success'),
-                    'error'   => session('error'),
-                ],
             ]);
         } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load customer management page.');
+            throw $e;
         }
     }
 
-    /** ✏️ Edit customer login credentials */
-    public function edit(Customer $customer)
+    /**
+     * ✏️ Edit customer login
+     */
+    public function edit($id)
     {
         try {
-            ActivityLogger::log('Editing Customer Login', "Superadmin opened edit form for {$customer->full_name}");
+            $customer = Customer::findOrFail($id);
 
             return Inertia::render('Superadmin/ManageCustomers/Edit', [
                 'customer' => $customer,
-                'flash' => [
-                    'success' => session('success'),
-                    'error'   => session('error'),
-                ],
             ]);
         } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to load customer edit form.');
+            throw $e;
         }
     }
 
-    /** 💾 Update customer info or password */
-    public function update(Request $request, Customer $customer)
+    /**
+     * 💾 Update login info
+     */
+    public function update(Request $request, $id)
     {
         try {
+            $customer = Customer::findOrFail($id);
+
             $validated = $request->validate([
                 'full_name' => 'required|string|max:255',
                 'email'     => 'nullable|email|unique:customers,email,' . $customer->id,
@@ -112,17 +102,6 @@ class ManageCustomersController extends Controller
                 'password'  => 'nullable|string|min:6',
             ]);
 
-            // 📞 Normalize phone numbers
-            if (!empty($validated['phone'])) {
-                $phone = preg_replace('/\D/', '', $validated['phone']);
-                if (str_starts_with($phone, '0')) {
-                    $validated['phone'] = '233' . substr($phone, 1);
-                } elseif (!str_starts_with($phone, '233')) {
-                    $validated['phone'] = '233' . $phone;
-                }
-            }
-
-            // 🔑 Only update password if field provided
             if (!empty($validated['password'])) {
                 $validated['password'] = bcrypt($validated['password']);
             } else {
@@ -131,129 +110,89 @@ class ManageCustomersController extends Controller
 
             $customer->update($validated);
 
-            ActivityLogger::log('Updated Customer Login', "Superadmin updated {$customer->full_name}'s login info.");
+            ActivityLogger::log('Updated Customer Login', "Updated {$customer->full_name}");
 
             return redirect()->route('superadmin.manage-customers.index')
-                ->with('success', "✅ {$customer->full_name}'s account updated successfully.");
+                ->with('success', "Updated {$customer->full_name}'s account.");
         } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to update customer.');
+            throw $e;
         }
     }
 
-    /** 🔁 Resend credentials */
-    public function resendCredentials(Customer $customer)
+    /**
+     * 📤 Resend credentials (SMS only)
+     */
+    public function resendCredentials($id)
     {
         try {
+            $customer = Customer::findOrFail($id);
+
             $newPassword = Str::random(8);
             $customer->update(['password' => bcrypt($newPassword)]);
 
-            ActivityLogger::log('Resent Customer Credentials', "Superadmin resent credentials to {$customer->full_name}");
+            ActivityLogger::log('Resent Customer Credentials', "Resent to {$customer->full_name}");
 
-            Log::info("📤 Resending credentials to {$customer->email} / {$customer->phone}");
+            // 🔥 SMS only (email disabled)
+            $this->notifyCustomer($customer, $newPassword);
 
-            $this->notifyCustomer($customer, $newPassword, 'resent');
-
-            return back()->with('success', "✅ Credentials resent to {$customer->full_name} (email & SMS).");
+            return back()->with('success', "📨 Credentials resent via SMS.");
         } catch (\Throwable $e) {
-            return $this->handleError($e, '❌ Failed to resend credentials.');
+            throw $e;
         }
     }
 
-    /** 🚫 Soft delete customer */
-    public function destroy(Customer $customer)
+    /**
+     * ❌ Permanent delete
+     */
+    public function destroy($id)
     {
         try {
-            $customer->delete();
+            $customer = Customer::findOrFail($id);
 
-            ActivityLogger::log('Soft Deleted Customer', "Superadmin soft-deleted {$customer->full_name}");
-
-            return back()->with('success', "✅ {$customer->full_name} moved to trash.");
-        } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to delete customer.');
-        }
-    }
-
-    /** ♻️ Restore customer */
-    public function restore($id)
-    {
-        try {
-            $customer = Customer::onlyTrashed()->findOrFail($id);
-            $customer->restore();
-
-            ActivityLogger::log('Restored Customer', "Superadmin restored {$customer->full_name}");
-
-            return back()->with('success', "✅ {$customer->full_name} restored successfully.");
-        } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to restore customer.');
-        }
-    }
-
-    /** ❌ Permanently delete customer */
-    public function forceDelete($id)
-    {
-        try {
-            $customer = Customer::onlyTrashed()->findOrFail($id);
             $name = $customer->full_name;
+            $customer->delete(); // permanent
 
-            $customer->forceDelete();
+            ActivityLogger::log('Deleted Customer', "Deleted {$name}");
 
-            ActivityLogger::log('Permanently Deleted Customer', "Superadmin permanently deleted {$name}");
-
-            return back()->with('success', "🗑️ {$name} permanently deleted.");
+            return back()->with('success', "🗑️ {$name} deleted.");
         } catch (\Throwable $e) {
-            return $this->handleError($e, '⚠️ Failed to permanently delete customer.');
+            throw $e;
         }
     }
 
-    /** ✉️ Notify customer (email + SMS) */
-    private function notifyCustomer(Customer $customer, string $password, string $type = 'created'): void
+
+    /* =========================================================================
+       📩 NOTIFICATION SYSTEM (SMS ONLY FOR NOW, EMAIL DISABLED)
+    ========================================================================= */
+
+    private function notifyCustomer(Customer $customer, string $password)
     {
         try {
-            // ✉️ Email notification
-            if (!empty($customer->email)) {
-                $mailable = $type === 'created'
-                    ? new CustomerWelcomeMail($customer)
-                    : new CustomerLoginMail($customer, $customer->email, $password);
+            // Build SMS text
+            $message = $this->buildSmsMessage($customer, $password);
 
-                Mail::to($customer->email)->send($mailable);
-                Log::info("✅ Email sent successfully to {$customer->email}");
-            }
-
-            // 📱 SMS notification
+            // Send SMS ONLY
             if (!empty($customer->phone)) {
-                $message = $type === 'created'
-                    ? "Hi {$customer->full_name}, welcome to Joelaar Micro-Credit! Your account has been created.\nEmail: {$customer->email}\nPassword: {$password}\nLogin: " . url('/login')
-                    : "Hi {$customer->full_name}, your login credentials have been reset.\nEmail: {$customer->email}\nPassword: {$password}\nLogin: " . url('/login');
-
-                try {
-                    $sent = SmsNotifier::send($customer->phone, $message);
-
-                    if (!$sent) {
-                        Log::warning("⚠️ SMS failed to send to {$customer->phone}");
-                    } else {
-                        Log::info("✅ SMS sent successfully to {$customer->phone}");
-                    }
-                } catch (\Throwable $smsError) {
-                    Log::error("❌ SMS exception for {$customer->phone}: " . $smsError->getMessage());
-                }
+                SmsNotifier::send($customer->phone, $message);
             }
-        } catch (\Throwable $notifyError) {
-            Log::warning('⚠️ Customer notification failed', [
-                'customer' => $customer->email,
-                'error' => $notifyError->getMessage(),
-            ]);
+
+        } catch (\Throwable $e) {
+            Log::warning("SMS Notifier Error: " . $e->getMessage());
         }
     }
 
-    /** ⚙️ Central error handler */
-    private function handleError(\Throwable $e, string $message)
+    /**
+     * 🧾 Create one centralized SMS format
+     */
+    private function buildSmsMessage(Customer $customer, string $password)
     {
-        Log::error('❌ ManageCustomerController Error', [
-            'user'  => auth()->user()?->email,
-            'route' => request()->path(),
-            'error' => $e->getMessage(),
-        ]);
+        $company = config('app.name', 'Joelaar');
+        $loginUrl = url('/login');
 
-        return back()->with('error', $message);
+        return "Hello {$customer->full_name}, your {$company} login was updated.\n"
+            ."Email: {$customer->email}\n"
+            ."Password: {$password}\n"
+            ."Login: {$loginUrl}\n"
+            ."Keep your credentials safe.";
     }
 }

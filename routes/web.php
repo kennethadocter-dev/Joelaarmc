@@ -58,7 +58,7 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
 
 
 // ======================================================================
-//                           SUPERADMIN ROUTES
+//                           SUPERADMIN ROUTES (CLEAN + FIXED)
 // ======================================================================
 Route::prefix('superadmin')
     ->middleware(['auth', 'verified'])
@@ -71,7 +71,7 @@ Route::prefix('superadmin')
         Route::get('/dashboard/loans-by-year', [DashboardController::class, 'getLoansByYear'])->name('dashboard.loansByYear');
         Route::get('/dashboard/expected-interest', [DashboardController::class, 'expectedInterest'])->name('dashboard.expectedInterest');
 
-        // SETTINGS (✓ matches Sidebar)
+        // SETTINGS
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
@@ -84,8 +84,19 @@ Route::prefix('superadmin')
             [SuperadminUserController::class, 'resendCredentials']
         )->name('users.resendCredentials');
 
-        // MANAGE CUSTOMERS
-        Route::resource('manage-customers', ManageCustomersController::class)->only(['index', 'show']);
+
+        // =====================================================
+        //      MANAGE CUSTOMERS (NO DUPLICATES, FULL WORKING)
+        // =====================================================
+
+        Route::resource('manage-customers', ManageCustomersController::class)
+            ->only(['index', 'show', 'edit', 'update', 'destroy']);
+
+        // RESEND LOGIN CREDENTIALS
+        Route::post('manage-customers/{id}/resend',
+            [ManageCustomersController::class, 'resendCredentials']
+        )->name('manage-customers.resend');
+
 
         // SYSTEM CONTROL
         Route::get('/system', [SystemController::class, 'index'])->name('system.index');
@@ -96,10 +107,10 @@ Route::prefix('superadmin')
         Route::post('/system/recalculate-loans', [SystemController::class, 'recalculateLoans'])->name('system.recalculateLoans');
         Route::post('/system/reset', [SystemController::class, 'reset'])->name('system.reset');
 
-        // CUSTOMERS (view only)
+        // CUSTOMERS (VIEW ONLY)
         Route::resource('customers', SuperadminCustomerController::class)->only(['index', 'show']);
 
-        // LOANS (view only)
+        // LOANS (VIEW ONLY)
         Route::resource('loans', AdminLoanController::class)->only(['index', 'show']);
 
         // REPORTS
@@ -111,15 +122,7 @@ Route::prefix('superadmin')
 
         // ACTIVITY LOGS
         Route::get('/activity', [SuperadminActivityController::class, 'index'])->name('activity.index');
-        Route::delete('/activity/clear', [SuperadminActivityController::class, 'clear'])->name('activity.clear'); // ✓ FIXED
-
-         // ACTIVITY LOGS (Superadmins can view)
-        Route::get('/activity', [SuperadminActivityController::class, 'index'])->name('activity.index');
-        Route::delete('/activity/clear', [SuperadminActivityController::class, 'clear'])->name('activity.clear'); // ✓ FIXED
-
-        Route::get('/activity-test', function () {
-            return Inertia::render('Superadmin/Activity/Test');
-        });
+        Route::delete('/activity/clear', [SuperadminActivityController::class, 'clear'])->name('activity.clear');
     });
 
 
@@ -148,7 +151,6 @@ Route::prefix('admin')
 
         // LOANS
         Route::resource('loans', AdminLoanController::class);
-
         Route::post('/loans/{loan}/record-payment', [AdminLoanController::class, 'recordPayment'])
             ->name('loans.recordPayment');
 
@@ -164,12 +166,10 @@ Route::prefix('admin')
             ->name('payments.store');
         Route::resource('payments', AdminPaymentController::class)->only(['index', 'show']);
 
-        // SETTINGS (✓ matches Sidebar)
+        // SETTINGS
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings.index');
         Route::put('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/reset', [AdminSettingsController::class, 'reset'])->name('settings.reset');
- 
-
     });
 
 

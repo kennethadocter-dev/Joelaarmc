@@ -10,9 +10,6 @@ export default function ActivityLogsIndex() {
     const tableRef = useRef(null);
     const confirm = useConfirm();
 
-    /* =====================================
-       🔍 CLIENT-SIDE SEARCH FILTER
-    ====================================== */
     const filteredLogs = logData.filter((log) => {
         const q = query.toLowerCase();
         return (
@@ -23,10 +20,6 @@ export default function ActivityLogsIndex() {
         );
     });
 
-    /* =====================================
-       🧹 CLEAR ALL LOGS
-       (Matches web.php → superadmin.activity.clear)
-    ====================================== */
     const clearLogs = () => {
         confirm(
             "Clear Activity Logs",
@@ -46,9 +39,6 @@ export default function ActivityLogsIndex() {
         );
     };
 
-    /* =====================================
-       MAIN PAGE
-    ====================================== */
     return (
         <AuthenticatedLayout
             header={
@@ -60,9 +50,6 @@ export default function ActivityLogsIndex() {
             <Head title="Activity Logs" />
 
             <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
-                {/* ================================
-                    🔍 SEARCH + ACTION BUTTONS
-                ================================= */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <input
                         type="text"
@@ -90,9 +77,6 @@ export default function ActivityLogsIndex() {
                     </div>
                 </div>
 
-                {/* ================================
-                    🧾 LOGS TABLE
-                ================================= */}
                 <div
                     ref={tableRef}
                     className="overflow-x-auto overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow 
@@ -122,7 +106,7 @@ export default function ActivityLogsIndex() {
                         </thead>
 
                         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                            {filteredLogs.length > 0 ? (
+                            {filteredLogs.length ? (
                                 filteredLogs.map((log, idx) => (
                                     <tr
                                         key={log.id}

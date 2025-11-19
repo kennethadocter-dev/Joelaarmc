@@ -120,7 +120,6 @@ export default function AuthenticatedLayout({ header, children }) {
     /* ============================
        MAIN LAYOUT
     ==============================*/
-
     return (
         <ConfirmContext.Provider value={{ confirm }}>
             <div className="min-h-screen flex bg-gray-100 dark:bg-gray-900">
@@ -132,7 +131,7 @@ export default function AuthenticatedLayout({ header, children }) {
                 {/* Main Area */}
                 <div className="flex-1 flex flex-col">
                     {/* HEADER */}
-                    <header className="bg-white dark:bg-gray-800 shadow relative z-50">
+                    <header className="bg-white dark:bg-gray-800 shadow relative z-30">
                         <div className="w-full py-4 px-6 flex justify-between items-center">
                             {header}
 
