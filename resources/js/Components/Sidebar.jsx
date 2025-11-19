@@ -103,7 +103,7 @@ export default function Sidebar() {
             ),
         },
 
-        // SETTINGS (✔ FULLY FIXED ROUTE NAMES)
+        // SETTINGS (✔ FIXED)
         {
             name: "Settings",
             routeName:
@@ -160,7 +160,7 @@ export default function Sidebar() {
             className={`${
                 collapsed ? "w-20" : "w-64"
             } h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-gray-200 
-            shadow-xl flex flex-col transition-all duration-300 overflow-hidden`}
+            shadow-xl flex flex-col transition-all duration-300 overflow-hidden z-40`}
         >
             {/* Header */}
             <div className="p-4 border-b border-gray-700 flex items-center justify-between">
