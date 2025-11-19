@@ -1,116 +1,176 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, {
+    useState,
+    useEffect,
+    useRef,
+    createContext,
+    useContext,
+} from "react";
 import { Link, usePage, router } from "@inertiajs/react";
 import { FaUserCircle, FaChevronDown } from "react-icons/fa";
 import Sidebar from "../Components/Sidebar.jsx";
 
+/* =========================================================
+   GLOBAL CONFIRMATION SYSTEM
+========================================================= */
+
+const ConfirmContext = createContext(null);
+
 export function useConfirm() {
-    const confirm = () => {};
-    const ConfirmDialog = () => null;
-    return { confirm, ConfirmDialog };
+    const ctx = useContext(ConfirmContext);
+    if (!ctx) {
+        console.warn("⚠ useConfirm called outside provider");
+        return () => {}; // avoid crash
+    }
+    return ctx.confirm;
 }
 
 export default function AuthenticatedLayout({ header, children }) {
-    const { auth } = usePage().props;
-    const user = auth?.user;
+    const { auth = {} } = usePage().props;
+    const user = auth.user || { role: "User" }; // ✔ safe fallback
 
     const [open, setOpen] = useState(false);
     const dropdownRef = useRef(null);
 
+    /* ============================
+       CONFIRMATION STATE
+    ==============================*/
+    const [confirmState, setConfirmState] = useState({
+        open: false,
+        title: "",
+        message: "",
+        type: "warning",
+        onConfirm: null,
+    });
+
+    const confirm = (title, message, onConfirm, type = "warning") => {
+        setConfirmState({
+            open: true,
+            title,
+            message,
+            type,
+            onConfirm,
+        });
+    };
+
+    const closeConfirm = () =>
+        setConfirmState((prev) => ({
+            ...prev,
+            open: false,
+        }));
+
+    /* LOGOUT */
     const handleLogout = (e) => {
         e.preventDefault();
         router.post(route("logout"));
     };
 
+    /* Close dropdown on outside click */
     useEffect(() => {
-        const handleClickOutside = (event) => {
+        const close = (e) => {
             if (
                 dropdownRef.current &&
-                !dropdownRef.current.contains(event.target)
+                !dropdownRef.current.contains(e.target)
             ) {
                 setOpen(false);
             }
         };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () =>
-            document.removeEventListener("mousedown", handleClickOutside);
+        document.addEventListener("mousedown", close);
+        return () => document.removeEventListener("mousedown", close);
     }, []);
 
-    return (
-        <div className="min-h-screen flex bg-gray-100 dark:bg-gray-900">
-            {/* Sidebar */}
-            <div className="flex-shrink-0 z-[100]">
-                <Sidebar />
-            </div>
+    /* ============================
+       CONFIRM POPUP UI (extracted)
+    ==============================*/
+    const ConfirmDialog = (
+        <div>
+            {confirmState.open && (
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[99999]">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-[90%] max-w-md">
+                        <h2 className="text-xl font-semibold">
+                            {confirmState.title}
+                        </h2>
+                        <p className="mt-3">{confirmState.message}</p>
 
-            {/* Main content */}
-            <div className="flex-1 flex flex-col">
-                {/* Top Nav */}
-                <header className="bg-white dark:bg-gray-800 shadow relative z-[9999]">
-                    <div className="w-full py-4 px-6 flex justify-between items-center">
-                        {header}
-
-                        {/* Profile Dropdown */}
-                        <div className="relative z-[10000]" ref={dropdownRef}>
+                        <div className="mt-6 flex justify-end gap-3">
                             <button
-                                onClick={() => setOpen(!open)}
-                                className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 
-                                    dark:bg-gray-700 dark:hover:bg-gray-600 px-3 py-2 rounded-lg transition"
+                                onClick={closeConfirm}
+                                className="px-4 py-2 bg-gray-300 rounded"
                             >
-                                <FaUserCircle className="text-gray-600 dark:text-gray-300 text-2xl" />
-                                <span className="text-gray-700 dark:text-gray-200 font-medium capitalize">
-                                    {user?.role === "superadmin"
-                                        ? "Super Admin"
-                                        : user?.role}
-                                </span>
-                                <FaChevronDown className="text-gray-500" />
+                                Cancel
                             </button>
-
-                            {open && (
-                                <div
-                                    className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 
-                                    shadow-lg rounded-md py-2 z-[10001]"
-                                >
-                                    {/* Edit Profile */}
-                                    <Link
-                                        href={route("profile.edit")}
-                                        onClick={() => setOpen(false)}
-                                        className="block px-4 py-2 text-gray-700 dark:text-gray-200 
-                                            hover:bg-gray-100 dark:hover:bg-gray-700"
-                                    >
-                                        Edit Profile
-                                    </Link>
-
-                                    {/* Logout */}
-                                    <button
-                                        onClick={handleLogout}
-                                        className="w-full text-left px-4 py-2 bg-red-600 text-white 
-                                            hover:bg-red-700 rounded-sm transition"
-                                    >
-                                        Logout
-                                    </button>
-                                </div>
-                            )}
+                            <button
+                                onClick={() => {
+                                    closeConfirm();
+                                    confirmState.onConfirm?.();
+                                }}
+                                className={`px-4 py-2 rounded text-white ${
+                                    confirmState.type === "danger"
+                                        ? "bg-red-600"
+                                        : "bg-blue-600"
+                                }`}
+                            >
+                                Confirm
+                            </button>
                         </div>
                     </div>
-                </header>
-
-                {/* Page Content */}
-                <main className="p-6 flex-1">
-                    {!route().current("admin.dashboard") &&
-                        !route().current("superadmin.dashboard") && (
-                            <button
-                                onClick={() => window.history.back()}
-                                className="mb-4 px-4 py-2 bg-gray-200 dark:bg-gray-700 
-                                text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 
-                                dark:hover:bg-gray-600 transition"
-                            >
-                                ← Back
-                            </button>
-                        )}
-
-                    {children}
-                </main>
-            </div>
+                </div>
+            )}
         </div>
+    );
+
+    /* ============================
+       MAIN LAYOUT
+    ==============================*/
+
+    return (
+        <ConfirmContext.Provider value={{ confirm }}>
+            <div className="min-h-screen flex bg-gray-100 dark:bg-gray-900">
+                {/* Sidebar */}
+                <div className="flex-shrink-0">
+                    <Sidebar />
+                </div>
+
+                {/* Main Area */}
+                <div className="flex-1 flex flex-col">
+                    <header className="bg-white dark:bg-gray-800 shadow relative">
+                        <div className="w-full py-4 px-6 flex justify-between items-center">
+                            {header}
+
+                            <div className="relative" ref={dropdownRef}>
+                                <button
+                                    onClick={() => setOpen(!open)}
+                                    className="flex items-center gap-2 px-3 py-2 rounded bg-gray-100 dark:bg-gray-700"
+                                >
+                                    <FaUserCircle className="text-2xl" />
+                                    <span>{user?.role}</span>
+                                    <FaChevronDown />
+                                </button>
+
+                                {open && (
+                                    <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 shadow-lg rounded-md py-2">
+                                        <Link
+                                            href={route("profile.edit")}
+                                            className="block px-4 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
+                                        >
+                                            Edit Profile
+                                        </Link>
+                                        <button
+                                            onClick={handleLogout}
+                                            className="w-full text-left px-4 py-2 bg-red-600 text-white hover:bg-red-700"
+                                        >
+                                            Logout
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="p-6 flex-1">{children}</main>
+                </div>
+
+                {ConfirmDialog}
+            </div>
+        </ConfirmContext.Provider>
     );
 }

@@ -1,12 +1,12 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, useForm, Link, usePage } from "@inertiajs/react";
+import { Head, useForm, Link, usePage, router } from "@inertiajs/react";
 
 export default function Edit({ user }) {
     const { auth } = usePage().props;
     const currentUser = auth?.user || {};
     const role = currentUser?.role || "superadmin";
 
-    // ✅ Determine correct base path (for routes)
+    // Determine correct base path
     const basePath =
         role === "superadmin"
             ? "superadmin"
@@ -26,15 +26,28 @@ export default function Edit({ user }) {
     const handleSubmit = (e) => {
         e.preventDefault();
 
-        // Normalize Ghanaian phone number format
+        // Normalize phone number
         let normalizedPhone = data.phone?.replace(/\D/g, "") || "";
-        if (normalizedPhone.startsWith("0"))
+        if (normalizedPhone.startsWith("0")) {
             normalizedPhone = "233" + normalizedPhone.slice(1);
-        else if (!normalizedPhone.startsWith("233"))
+        } else if (!normalizedPhone.startsWith("233")) {
             normalizedPhone = "233" + normalizedPhone;
-        setData("phone", normalizedPhone);
+        }
 
-        put(route(`${basePath}.users.update`, user.id));
+        const payload = {
+            ...data,
+            phone: normalizedPhone,
+        };
+
+        put(route(`${basePath}.users.update`, user.id), {
+            data: payload,
+            preserveScroll: true,
+
+            // 🔥 Force table refresh
+            onSuccess: () => {
+                router.visit(route(`${basePath}.users.index`));
+            },
+        });
     };
 
     return (
@@ -54,7 +67,7 @@ export default function Edit({ user }) {
                     </h1>
 
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* 🧍 Name */}
+                        {/* Name */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Full Name
@@ -66,8 +79,8 @@ export default function Edit({ user }) {
                                     setData("name", e.target.value)
                                 }
                                 required
-                                placeholder="Enter full name"
-                                className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
+                                className="mt-1 block w-full border rounded p-2 bg-white
+                                text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                             />
                             {errors.name && (
                                 <p className="text-red-500 text-sm mt-1">
@@ -76,7 +89,7 @@ export default function Edit({ user }) {
                             )}
                         </div>
 
-                        {/* 📧 Email */}
+                        {/* Email */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Email (optional)
@@ -87,8 +100,8 @@ export default function Edit({ user }) {
                                 onChange={(e) =>
                                     setData("email", e.target.value)
                                 }
-                                placeholder="e.g. user@example.com"
-                                className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
+                                className="mt-1 block w-full border rounded p-2 bg-white
+                                text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                             />
                             {errors.email && (
                                 <p className="text-red-500 text-sm mt-1">
@@ -97,7 +110,7 @@ export default function Edit({ user }) {
                             )}
                         </div>
 
-                        {/* ☎️ Phone */}
+                        {/* Phone */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Phone Number (optional)
@@ -108,8 +121,8 @@ export default function Edit({ user }) {
                                 onChange={(e) =>
                                     setData("phone", e.target.value)
                                 }
-                                placeholder="e.g. 0541234567 or 233541234567"
-                                className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
+                                className="mt-1 block w-full border rounded p-2 bg-white
+                                text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                             />
                             {errors.phone && (
                                 <p className="text-red-500 text-sm mt-1">
@@ -118,7 +131,7 @@ export default function Edit({ user }) {
                             )}
                         </div>
 
-                        {/* 🧩 Role */}
+                        {/* Role */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Role
@@ -128,7 +141,8 @@ export default function Edit({ user }) {
                                 onChange={(e) =>
                                     setData("role", e.target.value)
                                 }
-                                className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
+                                className="mt-1 block w-full border rounded p-2 bg-white
+                                text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                             >
                                 {role === "superadmin" && (
                                     <option value="superadmin">
@@ -148,7 +162,7 @@ export default function Edit({ user }) {
                             )}
                         </div>
 
-                        {/* 🔑 Password (optional) */}
+                        {/* Password */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -160,8 +174,8 @@ export default function Edit({ user }) {
                                     onChange={(e) =>
                                         setData("password", e.target.value)
                                     }
-                                    placeholder="Leave blank to keep existing"
-                                    className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
+                                    className="mt-1 block w-full border rounded p-2 bg-white
+                                    text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                                 />
                                 {errors.password && (
                                     <p className="text-red-500 text-sm mt-1">
@@ -183,13 +197,13 @@ export default function Edit({ user }) {
                                             e.target.value,
                                         )
                                     }
-                                    placeholder="Re-enter new password"
-                                    className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
+                                    className="mt-1 block w-full border rounded p-2 bg-white
+                                    text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                                 />
                             </div>
                         </div>
 
-                        {/* ✅ Buttons */}
+                        {/* Buttons */}
                         <div className="flex justify-between items-center pt-4 border-t dark:border-gray-700">
                             <Link
                                 href={route(`${basePath}.users.index`)}

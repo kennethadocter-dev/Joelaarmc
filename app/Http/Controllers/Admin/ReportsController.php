@@ -17,7 +17,10 @@ use Carbon\Carbon;
 
 class ReportsController extends Controller
 {
-    /** 🔧 Role-based helper */
+    /** 
+     * 🔧 Detect active panel (admin or superadmin)
+     * IMPORTANT: folder names are lowercase → "admin" / "superadmin"
+     */
     private function basePath(): string
     {
         $u = auth()->user();
@@ -26,7 +29,7 @@ class ReportsController extends Controller
             : 'admin';
     }
 
-    /** 📊 Reports Dashboard (Admin + Superadmin shared) */
+    /** 📊 Reports Dashboard (Admin + Superadmin shared controller) */
     public function index(Request $request)
     {
         try {
@@ -71,7 +74,7 @@ class ReportsController extends Controller
                 ];
             });
 
-            // ✅ Totals
+            // Totals
             $allLoans = Loan::all();
             $principal_disbursed = $allLoans->sum('amount');
 
@@ -114,80 +117,88 @@ class ReportsController extends Controller
 
             ActivityLogger::log('Viewed Reports', 'Reports dashboard viewed by ' . auth()->user()->name);
 
-            return Inertia::render('Admin/Reports/Index', [
-                'loans'    => $loans,
-                'totals'   => $totals,
-                'failures' => $failures,
-                'filters'  => [
-                    'status' => $statusFilter,
-                    'from'   => $from,
-                    'to'     => $to,
-                ],
-                'auth'     => ['user' => auth()->user()],
-                'basePath' => $this->basePath(),
-                'flash'    => [
-                    'success' => session('success'),
-                    'error'   => session('error'),
-                ],
-            ]);
+            return Inertia::render(
+                $this->basePath() . '/Reports/Index', // ⭐ CORRECT NOW
+                [
+                    'loans'    => $loans,
+                    'totals'   => $totals,
+                    'failures' => $failures,
+                    'filters'  => [
+                        'status' => $statusFilter,
+                        'from'   => $from,
+                        'to'     => $to,
+                    ],
+                    'auth'     => ['user' => auth()->user()],
+                    'basePath' => $this->basePath(),
+                    'flash'    => [
+                        'success' => session('success'),
+                        'error'   => session('error'),
+                    ],
+                ]
+            );
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to load reports.');
         }
     }
 
-    /** 📑 Single Loan Report (shared between admin + superadmin) */
+    /** 📑 Single Loan Report */
     public function show($loanId)
     {
         try {
             $loan = Loan::with(['customer', 'guarantors', 'payments', 'user'])->findOrFail($loanId);
 
-            // ✅ Fetch company settings correctly
             $settings = Setting::first();
-
             $today = Carbon::now();
-            $agreementLine = "THIS LOAN AGREEMENT is made at {$settings->company_name} office on the {$today->format('jS')} day of {$today->format('F')} {$today->format('Y')} between {$settings->company_name} (hereinafter referred to as the \"Lender\") and {$loan->client_name} (hereinafter referred to as the \"Borrower\").";
+
+            $agreementLine =
+                "THIS LOAN AGREEMENT is made at {$settings->company_name} office on the " .
+                $today->format('jS') . " day of " . $today->format('F') . " " . $today->format('Y') .
+                " between {$settings->company_name} (Lender) and {$loan->client_name} (Borrower).";
 
             ActivityLogger::log('Viewed Loan Report', "Loan #{$loan->id} viewed by " . auth()->user()->name);
 
-            return Inertia::render('Admin/Reports/Show', [
-                'loan'           => $loan,
-                'guarantors'     => $loan->guarantors,
-                'csrf_token'     => csrf_token(),
-                'agreement_line' => $agreementLine,
-                'settings'       => $settings, // ✅ passed to front-end
-                'auth'           => ['user' => auth()->user()],
-                'basePath'       => $this->basePath(),
-                'flash'          => [
-                    'success' => session('success'),
-                    'error'   => session('error'),
-                ],
-            ]);
+            return Inertia::render(
+                $this->basePath() . '/Reports/Show', // ⭐ CORRECT NOW
+                [
+                    'loan'           => $loan,
+                    'guarantors'     => $loan->guarantors,
+                    'csrf_token'     => csrf_token(),
+                    'agreement_line' => $agreementLine,
+                    'settings'       => $settings,
+                    'auth'           => ['user' => auth()->user()],
+                    'basePath'       => $this->basePath(),
+                    'flash'          => [
+                        'success' => session('success'),
+                        'error'   => session('error'),
+                    ],
+                ]
+            );
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Failed to load loan report.');
         }
     }
 
-    /** 📤 Send Loan Agreement Email */
+
+    /** 📤 Email Agreement */
     public function sendAgreement($loanId)
     {
         try {
             $loan = Loan::with(['customer', 'guarantors', 'user'])->findOrFail($loanId);
 
             if (!$loan->customer || empty($loan->customer->email)) {
-                return back()->with('error', '⚠️ This customer does not have an email address.');
+                return back()->with('error', '⚠️ Customer has no email.');
             }
 
-            // 🧾 Generate PDF
             $pdf = Pdf::loadView('loan_agreement_pdf', ['loan' => $loan])->setPaper('A4');
             $pdf->output();
 
-            // 📧 Send mail
             Mail::to($loan->customer->email)->send(new LoanAgreementMail($loan));
 
             ActivityLogger::log('Sent Loan Agreement', "Loan #{$loan->id} sent to {$loan->customer->email}");
 
-            return back()->with('success', '📧 Loan agreement email sent successfully.');
+            return back()->with('success', '📧 Loan agreement sent.');
         } catch (\Throwable $e) {
+
             EmailFailure::create([
                 'recipient'     => $loan->customer->email ?? 'unknown',
                 'subject'       => "Loan Agreement - {$loan->client_name}",
@@ -200,7 +211,7 @@ class ReportsController extends Controller
                 'error'   => $e->getMessage(),
             ]);
 
-            return back()->with('error', '⚠️ Email could not be sent. Admin has been notified.');
+            return back()->with('error', '⚠️ Email failed to send.');
         }
     }
 
@@ -212,13 +223,13 @@ class ReportsController extends Controller
 
             ActivityLogger::log('Cleared Email Failures', auth()->user()->name . ' cleared all failures.');
 
-            return back()->with('success', '🧹 All email failures cleared.');
+            return back()->with('success', '🧹 All failures cleared.');
         } catch (\Throwable $e) {
             return $this->handleError($e, '⚠️ Could not clear email failures.');
         }
     }
 
-    /** 🧰 Centralized Error Handler */
+    /** 🧰 Central error handler */
     private function handleError(\Throwable $e, string $message)
     {
         Log::error('❌ ReportsController Error', [

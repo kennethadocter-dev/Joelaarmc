@@ -3,12 +3,13 @@
 namespace App\Mail;
 
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;   // ⭐ REQUIRED
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 use App\Models\User;
 use App\Models\Setting;
 
-class AccountCreatedMail extends Mailable
+class AccountCreatedMail extends Mailable implements ShouldQueue   // ⭐ QUEUED MAIL
 {
     use Queueable, SerializesModels;
 
@@ -23,7 +24,7 @@ class AccountCreatedMail extends Mailable
     {
         $this->user = $user;
         $this->plainPassword = $plainPassword;
-        $this->settings = Setting::first(); // 🔄 Pull current company info
+        $this->settings = Setting::first(); // 🔄 load company info
     }
 
     /**
@@ -31,21 +32,21 @@ class AccountCreatedMail extends Mailable
      */
     public function build()
     {
-        $companyName = $this->settings->company_name ?? 'Joelaar Micro-Credit';
-        $companyEmail = $this->settings->email ?? config('mail.from.address');
-        $fromName = $this->settings->manager_name ?? $companyName;
+        $companyName    = $this->settings->company_name ?? 'Joelaar Micro-Credit';
+        $companyEmail   = $this->settings->email ?? config('mail.from.address');
+        $fromName       = $this->settings->manager_name ?? $companyName;
 
         return $this->from($companyEmail, $fromName)
             ->subject("🎉 Welcome to {$companyName} — Your Account Details")
             ->markdown('emails.account_created')
             ->with([
-                'name'        => $this->user->name,
-                'email'       => $this->user->email,
-                'password'    => $this->plainPassword,
-                'loginUrl'    => url('/login'),
-                'companyName' => $companyName,
-                'companyEmail'=> $companyEmail,
-                'companyPhone'=> $this->settings->phone ?? '+233000000000',
+                'name'           => $this->user->name,
+                'email'          => $this->user->email,
+                'password'       => $this->plainPassword,
+                'loginUrl'       => url('/login'),
+                'companyName'    => $companyName,
+                'companyEmail'   => $companyEmail,
+                'companyPhone'   => $this->settings->phone ?? '+233000000000',
                 'companyAddress' => $this->settings->address ?? 'Accra, Ghana',
             ]);
     }

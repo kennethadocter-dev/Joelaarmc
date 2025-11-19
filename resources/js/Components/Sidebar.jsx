@@ -11,6 +11,21 @@ import {
     FaServer,
 } from "react-icons/fa";
 
+/* ======================================
+   SAFE ROUTE WRAPPER
+======================================= */
+function safeRoute(name, params = {}) {
+    try {
+        return route(name, params);
+    } catch (e) {
+        console.warn("Missing route:", name);
+        return "#";
+    }
+}
+
+/* ======================================
+   Sidebar Component
+======================================= */
 export default function Sidebar() {
     const { auth, url } = usePage().props;
     const role = auth?.user?.role?.toLowerCase() || "";
@@ -31,7 +46,9 @@ export default function Sidebar() {
     const clean = (path) => (path || "").replace(/^\//, "");
     const current = clean(url);
 
-    // 🔥 Fixed all admin / superadmin routes here
+    /* ==========================
+       Base Links (Both Roles)
+    =========================== */
     const baseLinks = [
         {
             name: "Dashboard",
@@ -40,10 +57,11 @@ export default function Sidebar() {
                     ? "superadmin.dashboard"
                     : "admin.dashboard",
             icon: <FaTachometerAlt />,
-            href:
+            href: safeRoute(
                 role === "superadmin"
-                    ? route("superadmin.dashboard")
-                    : route("admin.dashboard"),
+                    ? "superadmin.dashboard"
+                    : "admin.dashboard",
+            ),
         },
         {
             name: "Customers",
@@ -52,10 +70,11 @@ export default function Sidebar() {
                     ? "superadmin.customers.index"
                     : "admin.customers.index",
             icon: <FaUsers />,
-            href:
+            href: safeRoute(
                 role === "superadmin"
-                    ? route("superadmin.customers.index")
-                    : route("admin.customers.index"),
+                    ? "superadmin.customers.index"
+                    : "admin.customers.index",
+            ),
         },
         {
             name: "Loans",
@@ -64,10 +83,11 @@ export default function Sidebar() {
                     ? "superadmin.loans.index"
                     : "admin.loans.index",
             icon: <FaMoneyBillWave />,
-            href:
+            href: safeRoute(
                 role === "superadmin"
-                    ? route("superadmin.loans.index")
-                    : route("admin.loans.index"),
+                    ? "superadmin.loans.index"
+                    : "admin.loans.index",
+            ),
         },
         {
             name: "Reports",
@@ -76,13 +96,14 @@ export default function Sidebar() {
                     ? "superadmin.reports.index"
                     : "admin.reports.index",
             icon: <FaFileAlt />,
-            href:
+            href: safeRoute(
                 role === "superadmin"
-                    ? route("superadmin.reports.index")
-                    : route("admin.reports.index"),
+                    ? "superadmin.reports.index"
+                    : "admin.reports.index",
+            ),
         },
 
-        // 🔥 Correct settings route for both roles
+        // SETTINGS (✔ FULLY FIXED ROUTE NAMES)
         {
             name: "Settings",
             routeName:
@@ -90,48 +111,56 @@ export default function Sidebar() {
                     ? "superadmin.settings.index"
                     : "admin.settings.index",
             icon: <FaCog />,
-            href:
+            href: safeRoute(
                 role === "superadmin"
-                    ? route("superadmin.settings.index")
-                    : route("admin.settings.index"),
+                    ? "superadmin.settings.index"
+                    : "admin.settings.index",
+            ),
         },
     ];
 
+    /* ==========================
+       Superadmin Exclusive Links
+    =========================== */
     const superadminExtras = [
         {
             name: "Activity Logs",
             routeName: "superadmin.activity.index",
             icon: <FaChartLine />,
-            href: route("superadmin.activity.index"),
+            href: safeRoute("superadmin.activity.index"),
         },
         {
             name: "Manage Users",
             routeName: "superadmin.users.index",
             icon: <FaUsers />,
-            href: route("superadmin.users.index"),
+            href: safeRoute("superadmin.users.index"),
         },
         {
             name: "Manage Customers",
             routeName: "superadmin.manage-customers.index",
             icon: <FaUsers />,
-            href: route("superadmin.manage-customers.index"),
+            href: safeRoute("superadmin.manage-customers.index"),
         },
         {
             name: "System Control",
             routeName: "superadmin.system.index",
             icon: <FaServer />,
-            href: route("superadmin.system.index"),
+            href: safeRoute("superadmin.system.index"),
         },
     ];
 
     const links =
         role === "superadmin" ? [...baseLinks, ...superadminExtras] : baseLinks;
 
+    /* ======================================
+       Render Sidebar
+    ======================================= */
     return (
         <aside
-            className={`${collapsed ? "w-20" : "w-64"}
-                h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-gray-200 
-                shadow-xl flex flex-col transition-all duration-300 overflow-hidden`}
+            className={`${
+                collapsed ? "w-20" : "w-64"
+            } h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-gray-200 
+            shadow-xl flex flex-col transition-all duration-300 overflow-hidden`}
         >
             {/* Header */}
             <div className="p-4 border-b border-gray-700 flex items-center justify-between">
@@ -163,34 +192,24 @@ export default function Sidebar() {
                 {links.map((item) => {
                     const href = item.href || "#";
 
-                    const hrefPath = clean(
-                        href.startsWith("http")
-                            ? href.replace(window.location.origin, "")
-                            : href,
-                    );
-
-                    const isActive =
-                        route().current(item.routeName) ||
-                        current === hrefPath ||
-                        current.startsWith(hrefPath);
+                    let isActive = false;
+                    try {
+                        isActive = route().current(item.routeName);
+                    } catch {}
 
                     return (
                         <Link
                             key={item.name}
                             href={href}
-                            className={`flex items-center gap-3 p-3 rounded-lg relative transition-all duration-200 
+                            className={`flex items-center gap-3 p-3 rounded-lg transition-all 
                                 hover:text-white hover:bg-gray-700
-                                
                                 ${
                                     isActive
-                                        ? `bg-gradient-to-r from-[#7a0000] via-[#b30000] to-[#ff1a1a] 
-                                           text-white shadow-[0_0_12px_rgba(255,0,0,0.5)]
-                                           scale-[1.03]`
+                                        ? "bg-gradient-to-r from-[#7a0000] via-[#b30000] to-[#ff1a1a] text-white shadow-lg scale-[1.03]"
                                         : ""
                                 }`}
                         >
                             <span className="text-xl">{item.icon}</span>
-
                             {!collapsed && (
                                 <span className="font-medium">{item.name}</span>
                             )}

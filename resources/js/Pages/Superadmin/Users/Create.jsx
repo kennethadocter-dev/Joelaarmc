@@ -1,13 +1,13 @@
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
-import { Head, useForm, Link, usePage } from "@inertiajs/react";
+import { Head, useForm, Link, usePage, router } from "@inertiajs/react";
 import { useState, useEffect } from "react";
 
 export default function Create() {
-    const { props } = usePage();
-    const authUser = props?.auth?.user || {};
+    const { auth } = usePage().props;
+    const authUser = auth?.user || {};
     const role = authUser?.role || "superadmin";
 
-    // ✅ Determine correct base path
+    // Determine correct base path
     const basePath =
         role === "superadmin"
             ? "superadmin"
@@ -26,7 +26,7 @@ export default function Create() {
 
     const [toast, setToast] = useState(null);
 
-    // 🕒 Auto-clear toast after 3 seconds
+    // Auto-clear toast after 3 seconds
     useEffect(() => {
         if (toast) {
             const t = setTimeout(() => setToast(null), 3000);
@@ -37,7 +37,7 @@ export default function Create() {
     const handleSubmit = (e) => {
         e.preventDefault();
 
-        // Normalize Ghanaian phone number
+        // Normalize Ghana phone number
         let normalizedData = { ...data };
         if (normalizedData.phone) {
             let phone = normalizedData.phone.replace(/\D/g, "");
@@ -49,10 +49,14 @@ export default function Create() {
         post(route(`${basePath}.users.store`), {
             data: normalizedData,
             preserveScroll: true,
+
+            // 🔥 Ensure table refreshes instantly
             onSuccess: () => {
                 setToast("✅ User created successfully!");
                 reset();
+                router.visit(route(`${basePath}.users.index`));
             },
+
             onError: () => {
                 setToast("❌ Failed to create user. Please check inputs.");
             },
@@ -71,7 +75,7 @@ export default function Create() {
         >
             <Head title="Add User" />
 
-            {/* ✅ Toast Message */}
+            {/* Toast */}
             {toast && (
                 <div className="fixed top-5 right-5 z-50 bg-blue-600 text-white px-4 py-2 rounded-md shadow-md animate-fade-in">
                     {toast}
@@ -85,7 +89,7 @@ export default function Create() {
                     </h1>
 
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* 🧍 Name */}
+                        {/* Name */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Full Name
@@ -107,7 +111,7 @@ export default function Create() {
                             )}
                         </div>
 
-                        {/* 📧 Email */}
+                        {/* Email */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Email (optional)
@@ -128,7 +132,7 @@ export default function Create() {
                             )}
                         </div>
 
-                        {/* ☎️ Phone */}
+                        {/* Phone */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Phone Number (optional)
@@ -140,8 +144,6 @@ export default function Create() {
                                     setData("phone", e.target.value)
                                 }
                                 placeholder="e.g. 0541234567 or 233541234567"
-                                pattern="^(0|233)\d{9}$"
-                                title="Enter a valid Ghanaian phone number"
                                 className="mt-1 block w-full border rounded p-2 bg-white text-gray-900 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
                             />
                             {errors.phone && (
@@ -151,7 +153,7 @@ export default function Create() {
                             )}
                         </div>
 
-                        {/* 🧩 Role */}
+                        {/* Role */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Role
@@ -176,7 +178,7 @@ export default function Create() {
                             )}
                         </div>
 
-                        {/* 🔑 Passwords */}
+                        {/* Password fields */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -217,7 +219,7 @@ export default function Create() {
                             </div>
                         </div>
 
-                        {/* ✅ Buttons */}
+                        {/* Buttons */}
                         <div className="flex justify-between items-center pt-4 border-t dark:border-gray-700">
                             <Link
                                 href={route(`${basePath}.users.index`)}

@@ -1,4 +1,4 @@
-import AuthenticatedLayout, { useConfirm } from "@/Layouts/AuthenticatedLayout";
+import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, Link, usePage, router } from "@inertiajs/react";
 import { useState } from "react";
 
@@ -7,7 +7,7 @@ export default function UsersIndex() {
     const currentUser = auth?.user || {};
     const role = currentUser.role || "superadmin";
 
-    // ✅ Determine correct route prefix
+    // Determine route base path
     const basePath =
         role === "superadmin"
             ? "superadmin"
@@ -22,68 +22,76 @@ export default function UsersIndex() {
         filters?.direction || "desc",
     );
 
-    const confirm = useConfirm();
-
-    // 🔁 Reload users dynamically
+    // Refresh user table (used for search/filter/sort)
     const reloadUsers = (params = {}) => {
-        router.get(`/${basePath}/users`, params, { preserveScroll: true });
+        router.get(`/${basePath}/users`, params, {
+            preserveScroll: true,
+            replace: true,
+        });
     };
 
-    // 🔍 Search users
     const handleSearch = (e) => {
         e.preventDefault();
         reloadUsers({ q: search, role: roleFilter });
     };
 
-    // 🎯 Filter by role
     const handleFilter = (role) => {
         const newRole = roleFilter === role ? "" : role;
         setRoleFilter(newRole);
         reloadUsers({ q: search, role: newRole });
     };
 
-    // 🧭 Sort users
     const handleSort = (field) => {
         let direction = "asc";
         if (sortField === field && sortDirection === "asc") direction = "desc";
+
         setSortField(field);
         setSortDirection(direction);
-        reloadUsers({ q: search, role: roleFilter, sort: field, direction });
+
+        reloadUsers({
+            q: search,
+            role: roleFilter,
+            sort: field,
+            direction,
+        });
     };
 
-    // 🔁 Resend credentials
-    const handleResend = (id) =>
-        confirm(
-            "Resend Login Details",
-            "Do you want to resend login credentials to this user?",
-            () =>
-                router.post(
-                    route(`${basePath}.users.resendCredentials`, id),
-                    {},
-                    {
-                        preserveScroll: true,
-                        onSuccess: () => {}, // handled by global toast
-                        onError: () => {},
-                    },
-                ),
-            "warning",
-        );
+    // 📩 Resend credentials (using native confirm)
+    const handleResend = (id) => {
+        const ok = window.confirm("Send login credentials again to this user?");
+        if (!ok) return;
 
-    // 🗑 Delete user
-    const handleDelete = (id) =>
-        confirm(
-            "Delete User",
-            "This will permanently delete the user. Proceed?",
-            () =>
-                router.delete(route(`${basePath}.users.destroy`, id), {
-                    preserveScroll: true,
-                    onSuccess: () => {}, // handled globally
-                    onError: () => {},
-                }),
-            "danger",
+        router.post(
+            route(`${basePath}.users.resendCredentials`, id),
+            {},
+            {
+                preserveScroll: true,
+                onSuccess: () =>
+                    window.toast?.success?.("📩 Credentials resent."),
+                onError: () =>
+                    window.toast?.error?.("❌ Failed to resend credentials."),
+            },
         );
+    };
 
-    // 🎨 Role cards and styles
+    // 🗑 Delete user (native confirm + toast)
+    const handleDelete = (id) => {
+        const ok = window.confirm(
+            "Are you sure you want to permanently delete this user?",
+        );
+        if (!ok) return;
+
+        router.delete(route(`${basePath}.users.destroy`, id), {
+            preserveScroll: true,
+            onSuccess: () => {
+                window.toast?.success?.("🗑️ User deleted.");
+                // Inertia will re-render the page with fresh `users`,
+                // so we don't *have* to manually reload.
+            },
+            onError: () => window.toast?.error?.("❌ Failed to delete user."),
+        });
+    };
+
     const roleStyles = {
         superadmin: {
             gradient: "from-purple-700 to-indigo-700",
@@ -111,7 +119,6 @@ export default function UsersIndex() {
         },
     };
 
-    // 🎨 Badge color
     const roleColor = (role, isCustomer = false) =>
         isCustomer
             ? "bg-amber-500 role-badge"
@@ -133,19 +140,18 @@ export default function UsersIndex() {
         <AuthenticatedLayout
             header={
                 <h2 className="text-xl font-semibold text-white">
-                    Manage Users (
-                    {role === "superadmin" ? "Superadmin" : "Admin"})
+                    Manage Users ({role})
                 </h2>
             }
         >
             <Head title="Manage Users" />
 
             <div className="py-6 max-w-7xl mx-auto space-y-6">
-                {/* Header */}
                 <div className="flex justify-between items-center">
                     <h3 className="font-semibold text-lg text-white">
                         Manage Users ({role})
                     </h3>
+
                     {role === "superadmin" && (
                         <Link
                             href={route(`${basePath}.users.create`)}
@@ -156,7 +162,7 @@ export default function UsersIndex() {
                     )}
                 </div>
 
-                {/* 🌈 Role Cards */}
+                {/* Role Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                     {Object.entries(roleStyles).map(
                         ([r, { gradient, icon, label, count }]) => (
@@ -183,14 +189,14 @@ export default function UsersIndex() {
                     )}
                 </div>
 
-                {/* 🔍 Search */}
+                {/* Search */}
                 <form onSubmit={handleSearch} className="flex gap-3 mt-6">
                     <input
                         type="text"
                         placeholder="Search by name, email or phone..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="flex-1 border border-gray-400 dark:border-gray-600 bg-white dark:bg-gray-900 rounded-md px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="flex-1 border border-gray-400 bg-white dark:border-gray-600 dark:bg-gray-900 rounded-md px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                     />
                     <button
                         type="submit"
@@ -200,7 +206,7 @@ export default function UsersIndex() {
                     </button>
                 </form>
 
-                {/* 🧾 Users Table */}
+                {/* USERS TABLE */}
                 <div className="bg-white dark:bg-gray-800 shadow rounded overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-300 dark:divide-gray-700">
                         <thead className="bg-gray-100 dark:bg-gray-700">
@@ -256,8 +262,7 @@ export default function UsersIndex() {
                                     const isCustomer =
                                         u.role === "user" &&
                                         !u.email?.includes("@jlmc") &&
-                                        !u.email?.includes("admin") &&
-                                        !u.email?.includes("staff");
+                                        !u.email?.includes("admin");
 
                                     const displayRole = isCustomer
                                         ? "Customer"
@@ -296,6 +301,7 @@ export default function UsersIndex() {
                                                     u.created_at,
                                                 ).toLocaleDateString()}
                                             </td>
+
                                             <td className="px-4 py-2 flex flex-wrap gap-3 text-sm">
                                                 {isCustomer ? (
                                                     <span className="text-gray-400 italic">
@@ -312,6 +318,7 @@ export default function UsersIndex() {
                                                         >
                                                             Edit
                                                         </Link>
+
                                                         {role ===
                                                             "superadmin" && (
                                                             <>
@@ -325,6 +332,7 @@ export default function UsersIndex() {
                                                                 >
                                                                     Resend Login
                                                                 </button>
+
                                                                 <button
                                                                     onClick={() =>
                                                                         handleDelete(

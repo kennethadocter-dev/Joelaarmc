@@ -23,7 +23,6 @@ class ActivityController extends Controller
 
     public function __construct()
     {
-        // Must be authenticated
         $this->middleware(['auth']);
     }
 
@@ -34,7 +33,7 @@ class ActivityController extends Controller
     {
         $user = auth()->user();
 
-        // ❗ Internal protection replacing broken middleware
+        // Internal protection
         if (
             !$user->is_super_admin &&
             !in_array($user->role, ['superadmin', 'admin', 'superuser'])
@@ -54,12 +53,12 @@ class ActivityController extends Controller
             ->withQueryString();
 
         return Inertia::render(
-            ucfirst($this->basePath()) . '/ActivityLog/Index',
+            ucfirst($this->basePath()) . '/Activity/Index', // ✅ FIXED PATH
             [
-                'logs'    => $logs,
-                'filters' => ['q' => $search],
-                'auth'    => ['user' => $user],
-                'basePath'=> $this->basePath(),
+                'logs'     => $logs,
+                'filters'  => ['q' => $search],
+                'auth'     => ['user' => $user],
+                'basePath' => $this->basePath(), // used by JS for dynamic routes
             ]
         );
     }
@@ -71,7 +70,7 @@ class ActivityController extends Controller
     {
         $user = auth()->user();
 
-        // ❗ Internal security
+        // Internal security
         if (
             !$user->is_super_admin &&
             !in_array($user->role, ['superadmin', 'admin', 'superuser'])
@@ -81,8 +80,11 @@ class ActivityController extends Controller
 
         ActivityLog::truncate();
 
-        ActivityLogger::log('Cleared Activity Logs', "Cleared by {$user->name}");
+        ActivityLogger::log(
+            'Cleared Activity Logs',
+            "Cleared by {$user->name}"
+        );
 
-        return back()->with('success', '✅ Logs cleared.');
+        return back()->with('success', 'Logs cleared.');
     }
 }

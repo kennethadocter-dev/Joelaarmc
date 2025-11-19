@@ -6,24 +6,56 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class SystemController extends Controller
 {
+    public function __construct()
+    {
+        // 🔒 Extra safety: only superadmin should access system control
+        $this->middleware(function ($request, $next) {
+            $user = auth()->user();
+
+            if (!$user || $user->role !== 'superadmin') {
+                abort(403, 'Access denied. Only Superadmin can access System Control.');
+            }
+
+            return $next($request);
+        });
+    }
+
     /**
      * 🏠 System Control Panel - Main Page
      */
     public function index()
     {
-        $stats = [
-            'total_loans' => DB::table('loans')->count(),
-            'total_customers' => DB::table('customers')->count(),
-            'total_payments' => DB::table('payments')->count(),
-        ];
+        try {
+            $stats = [
+                'total_loans'     => DB::table('loans')->count(),
+                'total_customers' => DB::table('customers')->count(),
+                'total_payments'  => DB::table('payments')->count(),
+            ];
+
+            $backups = $this->getBackupsList();
+        } catch (\Throwable $e) {
+            // If anything (DB/filesystem) fails, log it but still show the page
+            Log::error('❌ SystemController@index error', [
+                'error' => $e->getMessage(),
+            ]);
+
+            $stats = [
+                'total_loans'     => 0,
+                'total_customers' => 0,
+                'total_payments'  => 0,
+            ];
+
+            $backups = [];
+        }
 
         return inertia('Superadmin/System/Index', [
-            'stats' => $stats,
-            'backups' => $this->getBackupsList(),
+            'stats'    => $stats,
+            'backups'  => $backups,
             'basePath' => 'superadmin',
         ]);
     }
@@ -33,9 +65,20 @@ class SystemController extends Controller
      */
     public function listBackups()
     {
-        return response()->json([
-            'backups' => $this->getBackupsList(),
-        ]);
+        try {
+            return response()->json([
+                'backups' => $this->getBackupsList(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('❌ SystemController@listBackups error', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => '❌ Failed to load backups.',
+                'backups' => [],
+            ], 500);
+        }
     }
 
     /**
@@ -65,8 +108,13 @@ class SystemController extends Controller
             exec($command, $output, $resultCode);
 
             if ($resultCode !== 0) {
+                Log::error('❌ Backup failed', [
+                    'code'   => $resultCode,
+                    'output' => $output,
+                ]);
+
                 return response()->json([
-                    'message' => '❌ Backup failed. Please verify your database credentials and mysqldump installation.',
+                    'message' => '❌ Backup failed. Please verify database credentials and mysqldump installation.',
                     'backups' => $this->getBackupsList(),
                 ], 500);
             }
@@ -76,6 +124,10 @@ class SystemController extends Controller
                 'backups' => $this->getBackupsList(),
             ]);
         } catch (Exception $e) {
+            Log::error('❌ SystemController@backup error', [
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json([
                 'message' => '❌ Error during backup: ' . $e->getMessage(),
             ], 500);
@@ -88,8 +140,10 @@ class SystemController extends Controller
     public function restore(Request $request)
     {
         $file = $request->input('file');
+
+        // NOTE: this is still a placeholder — not actually running SQL import.
         return response()->json([
-            'message' => "✅ Backup '{$file}' restored successfully!",
+            'message' => "✅ Backup '{$file}' restored successfully! (placeholder)",
         ]);
     }
 
@@ -112,7 +166,7 @@ class SystemController extends Controller
     }
 
     /**
-     * 🗑️ Delete a backup (fully fixed)
+     * 🗑️ Delete a backup
      */
     public function deleteBackup(Request $request)
     {
@@ -125,9 +179,8 @@ class SystemController extends Controller
             ], 400);
         }
 
-        // Try both Storage and native unlink, whichever exists
         $storagePath = "backups/{$file}";
-        $fullPath = storage_path("app/backups/{$file}");
+        $fullPath    = storage_path("app/backups/{$file}");
 
         if (Storage::disk('local')->exists($storagePath)) {
             Storage::disk('local')->delete($storagePath);
@@ -151,8 +204,9 @@ class SystemController extends Controller
      */
     public function recalculateLoans()
     {
+        // Hook in your real logic later
         return response()->json([
-            'message' => '✅ Loan recalculation complete!',
+            'message' => '✅ Loan recalculation complete! (placeholder)',
         ]);
     }
 
@@ -163,8 +217,9 @@ class SystemController extends Controller
     {
         $keep = $request->input('keep') ?? 'superadmin_only';
 
+        // Hook in your real logic later
         return response()->json([
-            'message' => "✅ System reset complete (kept: {$keep}).",
+            'message' => "✅ System reset complete (kept: {$keep}). (placeholder)",
         ]);
     }
 
@@ -184,9 +239,9 @@ class SystemController extends Controller
             return [];
         }
 
-        $backups = collect($files)
-            ->filter(fn($file) => is_file($file))
-            ->map(fn($file) => [
+        return collect($files)
+            ->filter(fn ($file) => is_file($file))
+            ->map(fn ($file) => [
                 'file' => basename($file),
                 'size' => round(filesize($file) / 1024, 2) . ' KB',
                 'date' => date('Y-m-d H:i:s', filemtime($file)),
@@ -194,7 +249,5 @@ class SystemController extends Controller
             ->sortByDesc('date')
             ->values()
             ->toArray();
-
-        return $backups;
     }
 }
